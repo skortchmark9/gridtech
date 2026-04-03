@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridTherm — Demand Response Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel-alt: #f0f2f5;
+    --border: #e0e4e8;
+    --text: #1a2b3c;
+    --text-dim: #6b7a8d;
+    --accent: #0277bd;
+    --green: #2e7d32;
+    --amber: #e65100;
+    --red: #c62828;
+    --cyan: #00838f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    height: 56px;
+  }
+  .header .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header .brand svg { width: 28px; height: 28px; }
+  .header .brand h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .header .brand span {
+    color: var(--accent);
+    font-weight: 300;
+  }
+  .header .status-bar {
+    display: flex;
+    gap: 24px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .header .status-bar .live {
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .header .status-bar .live::before {
+    content: '';
+    width: 8px; height: 8px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Main layout ── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    height: calc(100vh - 56px);
+  }
+
+  /* ── Map panel ── */
+  .map-panel {
+    position: relative;
+  }
+  #map { height: 100%; width: 100%; }
+  .map-overlay {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    min-width: 200px;
+  }
+  .map-overlay h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .map-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .map-legend .item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .map-legend .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Right panel ── */
+  .right-panel {
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Metrics strip ── */
+  .metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .metric-card {
+    background: var(--panel);
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .metric-card .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .metric-card .value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.1;
+  }
+  .metric-card .unit {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  /* ── Utilization & grid section ── */
+  .info-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .info-section h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  /* Utilization bar */
+  .util-bar-container {
+    margin-bottom: 12px;
+  }
+  .util-bar-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .util-bar {
+    height: 20px;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .util-bar .segment {
+    height: 100%;
+    float: left;
+    transition: width 0.6s ease;
+  }
+  .util-bar .base { background: var(--cyan); opacity: 0.6; }
+  .util-bar .dr { background: var(--accent); }
+  .util-bar .spare { background: var(--panel-alt); }
+  .util-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* Grid stats */
+  .grid-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .grid-stat {
+    background: var(--panel-alt);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .grid-stat .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .grid-stat .stat-value {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .grid-stat .stat-detail {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .stat-green { color: var(--green); }
+  .stat-cyan { color: var(--cyan); }
+  .stat-amber { color: var(--amber); }
+
+  /* ── Building roster ── */
+  .roster-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .roster-header h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+  }
+  .roster-header .filter-pills {
+    display: flex;
+    gap: 4px;
+  }
+  .filter-pill {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .filter-pill:hover, .filter-pill.active {
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+  }
+
+  .roster {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .roster::-webkit-scrollbar { width: 6px; }
+  .roster::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .building-row {
+    display: grid;
+    grid-template-columns: 1fr 70px 80px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .building-row:hover {
+    background: var(--panel-alt);
+  }
+  .building-row .bldg-name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .building-row .bldg-addr {
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+  .building-row .bldg-mw {
+    font-size: 13px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .building-row .bldg-status {
+    text-align: right;
+  }
+  .status-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 8px;
+  }
+  .status-responding {
+    background: rgba(46,125,50,0.1);
+    color: var(--green);
+  }
+  .status-ready {
+    background: rgba(2,119,189,0.1);
+    color: var(--accent);
+  }
+  .status-offline {
+    background: rgba(198,40,40,0.1);
+    color: var(--red);
+  }
+
+  /* Leaflet popup override */
+  .leaflet-popup-content-wrapper {
+    background: var(--panel) !important;
+    color: var(--text) !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+  }
+  .leaflet-popup-tip {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+  }
+  .leaflet-popup-content {
+    font-family: inherit !important;
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+    margin: 10px 14px !important;
+  }
+  .leaflet-popup-content b { color: var(--accent); }
+  .popup-status { font-weight: 600; text-transform: uppercase; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="brand">
+    <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="28" height="28" rx="6" fill="#0277bd" fill-opacity="0.15"/>
+      <path d="M7 21V11l7-5 7 5v10" stroke="#0277bd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M14 6v3" stroke="#0277bd" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M10 17h8M10 20h8" stroke="#0277bd" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+      <circle cx="14" cy="13.5" r="2" stroke="#0277bd" stroke-width="1.2"/>
+    </svg>
+    <h1>Grid<span>Therm</span></h1>
+  </div>
+  <div class="status-bar">
+    <div class="live">System Active</div>
+    <div>Manhattan Steam District &middot; Zone J</div>
+    <div>Summer 2025</div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- Map -->
+  <div class="map-panel">
+    <div id="map"></div>
+    <div class="map-overlay">
+      <h3>Enrolled Buildings</h3>
+      <div class="map-legend">
+        <div class="item"><div class="dot" style="background:var(--green)"></div>Responding &mdash; 129</div>
+        <div class="item"><div class="dot" style="background:var(--accent)"></div>Ready &mdash; 239</div>
+        <div class="item"><div class="dot" style="background:var(--red)"></div>Offline &mdash; 34</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <!-- Metric cards -->
+    <div class="metrics-strip">
+      <div class="metric-card">
+        <div class="label">Enrolled</div>
+        <div class="value">402</div>
+        <div class="unit">buildings</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Committed</div>
+        <div class="value">345.3<span class="unit"> MW</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Responding</div>
+        <div class="value" style="color:var(--green)">113.8<span class="unit"> MW</span></div>
+      </div>
+    </div>
+
+    <!-- Steam utilization -->
+    <div class="info-section">
+      <h3>Steam System Utilization</h3>
+      <div class="util-bar-container">
+        <div class="util-bar-header">
+          <span>Base load: 15.8%</span>
+          <span style="color:var(--accent)">+ DR: 5.6%</span>
+          <span style="color:var(--text-dim)">Total: 21.4%</span>
+        </div>
+        <div class="util-bar">
+          <div class="segment base" style="width:15.8%"></div>
+          <div class="segment dr" style="width:5.6%"></div>
+        </div>
+        <div class="util-labels">
+          <span>0 Mlb/hr</span>
+          <span>1578 base + 554 DR</span>
+          <span>9,994 Mlb/hr</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid commitments & efficiency -->
+    <div class="info-section">
+      <h3>Grid Commitments & Efficiency</h3>
+      <div class="grid-stats">
+        <div class="grid-stat">
+          <div class="stat-label">Zone J Peak Relief</div>
+          <div class="stat-value stat-green">1.8%</div>
+          <div class="stat-detail">of 10.88 GW peak demand</div>
+        </div>
+        <div class="grid-stat">
+          <div class="stat-label">CO&#8322; Reduction</div>
+          <div class="stat-value stat-green">-116.6%</div>
+          <div class="stat-detail">vs electric cooling (marginal)</div>
+        </div>
+        <div class="grid-stat">
+          <div class="stat-label">Spare Capacity Used</div>
+          <div class="stat-value stat-cyan">6.6%</div>
+          <div class="stat-detail">554 / 8416 Mlb/hr</div>
+        </div>
+        <div class="grid-stat">
+          <div class="stat-label">Cogen Share</div>
+          <div class="stat-value stat-amber">84.6%</div>
+          <div class="stat-detail">of summer steam supply</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Building roster -->
+    <div class="roster-header">
+      <h3>Building Roster</h3>
+      <div class="filter-pills">
+        <button class="filter-pill active" onclick="filterRoster('all')">All</button>
+        <button class="filter-pill" onclick="filterRoster('responding')">Responding</button>
+        <button class="filter-pill" onclick="filterRoster('ready')">Ready</button>
+        <button class="filter-pill" onclick="filterRoster('offline')">Offline</button>
+      </div>
+    </div>
+    <div class="roster" id="roster"></div>
+  </div>
+</div>
+
+<script>
+const buildings = [{"name": "Rockefeller Center (All Bldgs)", "address": "Rockefeller Center", "type": "Office", "sqft": 8053115, "peak_mw": 15.88, "avg_mw": 10.02, "lat": 40.759268, "lon": -73.977844, "status": "responding", "cooling_towers": 0, "steam_pct": 27.2}, {"name": "30 Rockefeller Plaza (Bld 1 & 9)", "address": "30 Rockefeller Plaza", "type": "Office", "sqft": 2911536, "peak_mw": 15.26, "avg_mw": 10.63, "lat": 40.758754, "lon": -73.978692, "status": "ready", "cooling_towers": 1, "steam_pct": 42.5}, {"name": "Havemeyer Hall", "address": "3000 Broadway", "type": "College/University", "sqft": 126673, "peak_mw": 11.38, "avg_mw": 9.07, "lat": 40.808963, "lon": -73.963186, "status": "ready", "cooling_towers": 1, "steam_pct": 12.7}, {"name": "NH LHH 112 East 77 St 1082183", "address": "112 East 77 Street", "type": "Hospital (General Medical & Surgical)", "sqft": 103019, "peak_mw": 5.63, "avg_mw": 4.34, "lat": 40.773999, "lon": -73.960725, "status": "ready", "cooling_towers": 2, "steam_pct": 60.3}, {"name": "LCPA - MET/CMP", "address": "60 Columbus Ave", "type": "Performing Arts", "sqft": 896458, "peak_mw": 5.62, "avg_mw": 4.13, "lat": 40.771277, "lon": -73.983299, "status": "responding", "cooling_towers": 0, "steam_pct": 84.5}, {"name": "1221 Avenue of the Americas", "address": "1221 Avenue of the Americas", "type": "Office", "sqft": 2636182, "peak_mw": 4.99, "avg_mw": 3.35, "lat": 40.759101, "lon": -73.982136, "status": "responding", "cooling_towers": 1, "steam_pct": 36.1}, {"name": "ESRT - Empire State Building", "address": "338 5 AVENUE", "type": "Office", "sqft": 2852257, "peak_mw": 4.57, "avg_mw": 3.43, "lat": 40.747878, "lon": -73.984979, "status": "responding", "cooling_towers": 1, "steam_pct": 36.8}, {"name": "1271 Avenue of the Americas", "address": "1271 Avenue of the Americas", "type": "Office", "sqft": 1962900, "peak_mw": 4.56, "avg_mw": 2.98, "lat": 40.760289, "lon": -73.980157, "status": "ready", "cooling_towers": 1, "steam_pct": 30.8}, {"name": "BARUCH/BARUCH HOUSES ADDITION", "address": "605 FDR DRIVE", "type": "Multifamily Housing", "sqft": 2135564, "peak_mw": 4.29, "avg_mw": 2.7, "lat": 40.718356, "lon": -73.97521, "status": "ready", "cooling_towers": 0, "steam_pct": 67.5}, {"name": "New York Hilton Midtown (NYCNH)", "address": "1335 Avenue of the Americas", "type": "Hotel", "sqft": 1440995, "peak_mw": 4.18, "avg_mw": 2.42, "lat": 40.762218, "lon": -73.978742, "status": "ready", "cooling_towers": 1, "steam_pct": 55.3}, {"name": "250 Vesey Street", "address": "250 VESEY STREET", "type": "Office", "sqft": 2025102, "peak_mw": 4.02, "avg_mw": 2.97, "lat": 40.714529, "lon": -74.015677, "status": "ready", "cooling_towers": 3, "steam_pct": 24.8}, {"name": "Deutsche Bank Center", "address": "10 Columbus Circle", "type": "Mixed Use Property", "sqft": 2598958, "peak_mw": 3.68, "avg_mw": 1.88, "lat": 40.768274, "lon": -73.98231, "status": "ready", "cooling_towers": 1, "steam_pct": 42.0}, {"name": "3 Bryant Park", "address": "1095 6th Avenue", "type": "Office", "sqft": 1216578, "peak_mw": 3.62, "avg_mw": 2.55, "lat": 40.754688, "lon": -73.984241, "status": "ready", "cooling_towers": 2, "steam_pct": 23.0}, {"name": "1515 Broadway", "address": "1515 Broadway", "type": "Office", "sqft": 1932895, "peak_mw": 3.56, "avg_mw": 2.48, "lat": 40.757636, "lon": -73.985804, "status": "ready", "cooling_towers": 1, "steam_pct": 44.4}, {"name": "601 Lexington Avenue", "address": "601 Lexington Avenue", "type": "Office", "sqft": 1707488, "peak_mw": 3.37, "avg_mw": 2.35, "lat": 40.758465, "lon": -73.970914, "status": "responding", "cooling_towers": 1, "steam_pct": 30.0}, {"name": "(71003A) Herald Square Macy's", "address": "441 7th Ave", "type": "Retail Store", "sqft": 2192088, "peak_mw": 3.05, "avg_mw": 1.95, "lat": 40.751038, "lon": -73.990576, "status": "ready", "cooling_towers": 1, "steam_pct": 33.0}, {"name": "157 West 57th Street", "address": "157 West 57th Street", "type": "Multifamily Housing", "sqft": 844182, "peak_mw": 3.0, "avg_mw": 2.17, "lat": 40.765205, "lon": -73.979279, "status": "ready", "cooling_towers": 1, "steam_pct": 53.7}, {"name": "383 Madison (375 MADISON AVE)", "address": "375 MADISON AVENUE", "type": "Financial Office", "sqft": 1238330, "peak_mw": 2.85, "avg_mw": 1.67, "lat": 40.755257, "lon": -73.977477, "status": "ready", "cooling_towers": 6, "steam_pct": 30.8}, {"name": "Benchmarking Group - 1", "address": "1 Centre St", "type": "Office", "sqft": 1505431, "peak_mw": 2.84, "avg_mw": 2.04, "lat": 40.713001, "lon": -74.004181, "status": "responding", "cooling_towers": 0, "steam_pct": 49.5}, {"name": "ConEd Irving Place", "address": "2 Irving Place", "type": "Office", "sqft": 1255204, "peak_mw": 2.74, "avg_mw": 2.01, "lat": 40.734064, "lon": -73.988695, "status": "ready", "cooling_towers": 4, "steam_pct": 46.8}, {"name": "28 Liberty", "address": "28 Liberty St", "type": "Office", "sqft": 2200000, "peak_mw": 2.67, "avg_mw": 1.4, "lat": 40.708115, "lon": -74.008768, "status": "responding", "cooling_towers": 1, "steam_pct": 45.6}, {"name": "1251 Avenue of the Americas", "address": "1251 Avenue of the Americas", "type": "Office", "sqft": 2325598, "peak_mw": 2.66, "avg_mw": 1.38, "lat": 40.759644, "lon": -73.980627, "status": "responding", "cooling_towers": 1, "steam_pct": 37.3}, {"name": "787 Seventh Avenue", "address": "787 Seventh Avenue", "type": "Office", "sqft": 1811610, "peak_mw": 2.65, "avg_mw": 1.74, "lat": 40.761955, "lon": -73.982622, "status": "ready", "cooling_towers": 1, "steam_pct": 33.2}, {"name": "1301 Avenue of the Americas", "address": "1301 Avenue of the Americas", "type": "Office", "sqft": 2030239, "peak_mw": 2.48, "avg_mw": 1.71, "lat": 40.761244, "lon": -73.979457, "status": "ready", "cooling_towers": 1, "steam_pct": 61.8}, {"name": "Five Manhattan West", "address": "450 West 33rd Street", "type": "Office", "sqft": 1604716, "peak_mw": 2.46, "avg_mw": 1.57, "lat": 40.753563, "lon": -73.998813, "status": "offline", "cooling_towers": 1, "steam_pct": 27.5}, {"name": "9 W 57th Street", "address": "9 W 57th Street", "type": "Office", "sqft": 1617773, "peak_mw": 2.46, "avg_mw": 1.65, "lat": 40.763255, "lon": -73.974633, "status": "ready", "cooling_towers": 4, "steam_pct": 44.4}, {"name": "420 Lexington Avenue", "address": "420 Lexington Avenue", "type": "Office", "sqft": 1325523, "peak_mw": 2.34, "avg_mw": 1.62, "lat": 40.752262, "lon": -73.975464, "status": "ready", "cooling_towers": 1, "steam_pct": 36.6}, {"name": "345 Park Ave LP", "address": "345 Park Ave", "type": "Office", "sqft": 1783232, "peak_mw": 2.25, "avg_mw": 1.33, "lat": 40.758171, "lon": -73.973246, "status": "ready", "cooling_towers": 2, "steam_pct": 54.6}, {"name": "1 United Nations Plaza", "address": "1 United Nations Plaza", "type": "Office", "sqft": 587000, "peak_mw": 2.17, "avg_mw": 1.38, "lat": 40.750441, "lon": -73.968676, "status": "responding", "cooling_towers": 1, "steam_pct": 0.0}, {"name": "Hearst Tower LL84 - LL84 Submission", "address": "300 West 57th Street", "type": "Office", "sqft": 856000, "peak_mw": 2.16, "avg_mw": 1.31, "lat": 40.766446, "lon": -73.983325, "status": "responding", "cooling_towers": 1, "steam_pct": 28.5}, {"name": "NEW YORK TIMES BUILDING", "address": "620 EIGHTH AVENUE", "type": "Office", "sqft": 1453912, "peak_mw": 2.05, "avg_mw": 1.16, "lat": 40.756039, "lon": -73.990651, "status": "responding", "cooling_towers": 2, "steam_pct": 25.8}, {"name": "633 Third", "address": "633 3 AVENUE", "type": "Office", "sqft": 979730, "peak_mw": 2.03, "avg_mw": 1.19, "lat": 40.74991, "lon": -73.975061, "status": "responding", "cooling_towers": 1, "steam_pct": 42.1}, {"name": "51 Madison", "address": "51 Madison Avenue", "type": "Office", "sqft": 1485386, "peak_mw": 2.03, "avg_mw": 1.26, "lat": 40.743023, "lon": -73.986402, "status": "ready", "cooling_towers": 1, "steam_pct": 41.9}, {"name": "The Eugene", "address": "431 W 31st street", "type": "Multifamily Housing", "sqft": 860643, "peak_mw": 2.0, "avg_mw": 1.37, "lat": 40.75201, "lon": -73.998903, "status": "offline", "cooling_towers": 0, "steam_pct": 40.8}, {"name": "ESRT - One Grand Central Place", "address": "56 EAST 42 STREET", "type": "Office", "sqft": 1143977, "peak_mw": 1.98, "avg_mw": 1.41, "lat": 40.752612, "lon": -73.978853, "status": "ready", "cooling_towers": 1, "steam_pct": 55.9}, {"name": "FULTON", "address": "401 WEST 16TH STREET", "type": "Multifamily Housing", "sqft": 932450, "peak_mw": 1.97, "avg_mw": 1.24, "lat": 40.742321, "lon": -74.004478, "status": "ready", "cooling_towers": 0, "steam_pct": 80.3}, {"name": "375 Park Avenue", "address": "375 Park Avenue", "type": "Financial Office", "sqft": 824906, "peak_mw": 1.88, "avg_mw": 1.22, "lat": 40.758786, "lon": -73.972801, "status": "responding", "cooling_towers": 1, "steam_pct": 43.2}, {"name": "THE PIERRE HOTEL", "address": "2 EAST 61ST STREET", "type": "Hotel", "sqft": 538196, "peak_mw": 1.84, "avg_mw": 1.29, "lat": 40.765409, "lon": -73.971864, "status": "responding", "cooling_towers": 2, "steam_pct": 64.0}, {"name": "New York Athletic Club (180 WEST 59 STREET)", "address": "180 WEST 59 STREET", "type": "Hotel", "sqft": 428525, "peak_mw": 1.78, "avg_mw": 1.2, "lat": 40.766725, "lon": -73.978737, "status": "responding", "cooling_towers": 2, "steam_pct": 61.6}, {"name": "Grace Building (1110 6 AVENUE)", "address": "1110 6 AVENUE", "type": "Office", "sqft": 1537287, "peak_mw": 1.78, "avg_mw": 1.26, "lat": 40.755234, "lon": -73.983819, "status": "ready", "cooling_towers": 1, "steam_pct": 42.2}, {"name": "25 Broadway", "address": "25 Broadway", "type": "Office", "sqft": 943164, "peak_mw": 1.64, "avg_mw": 1.31, "lat": 40.705752, "lon": -74.013374, "status": "responding", "cooling_towers": 1, "steam_pct": 28.9}, {"name": "Lincoln Guild Housing Corp", "address": "303 West 66 St", "type": "Multifamily Housing", "sqft": 426476, "peak_mw": 1.64, "avg_mw": 1.13, "lat": 40.776108, "lon": -73.987432, "status": "ready", "cooling_towers": 0, "steam_pct": 39.8}, {"name": "Fisher - 605 3rd Avenue", "address": "605 3rd Avenue", "type": "Office", "sqft": 934292, "peak_mw": 1.61, "avg_mw": 1.01, "lat": 40.749076, "lon": -73.975682, "status": "ready", "cooling_towers": 1, "steam_pct": 39.1}, {"name": "51 West 52nd Street", "address": "51 West 52nd Street", "type": "Office", "sqft": 892704, "peak_mw": 1.6, "avg_mw": 1.06, "lat": 40.760648, "lon": -73.978309, "status": "ready", "cooling_towers": 1, "steam_pct": 48.7}, {"name": "622 3rd Avenue", "address": "622 3rd Avenue", "type": "Office", "sqft": 1088000, "peak_mw": 1.56, "avg_mw": 0.93, "lat": 40.749581, "lon": -73.975324, "status": "ready", "cooling_towers": 2, "steam_pct": 59.4}, {"name": "1166 Avenue of the Americas - CBRE", "address": "1166 Avenue of the Americas", "type": "Office", "sqft": 1556174, "peak_mw": 1.54, "avg_mw": 0.75, "lat": 40.757004, "lon": -73.982526, "status": "ready", "cooling_towers": 1, "steam_pct": 57.3}, {"name": "Dominick Hotel", "address": "246 Spring Street", "type": "Hotel", "sqft": 390337, "peak_mw": 1.51, "avg_mw": 1.11, "lat": 40.725616, "lon": -74.005253, "status": "ready", "cooling_towers": 1, "steam_pct": 45.7}, {"name": "The Greenwich Lane - Parent", "address": "1 7 Avenue", "type": "Multifamily Housing", "sqft": 704145, "peak_mw": 1.51, "avg_mw": 1.05, "lat": 40.736656, "lon": -74.001018, "status": "ready", "cooling_towers": 1, "steam_pct": 61.5}, {"name": "220 East 42nd Street", "address": "220 East 42nd Street", "type": "Office", "sqft": 1135317, "peak_mw": 1.47, "avg_mw": 0.74, "lat": 40.750256, "lon": -73.973256, "status": "responding", "cooling_towers": 1, "steam_pct": 34.3}, {"name": "140 Broadway", "address": "140 Broadway", "type": "Office", "sqft": 1272119, "peak_mw": 1.46, "avg_mw": 0.81, "lat": 40.709043, "lon": -74.010626, "status": "ready", "cooling_towers": 1, "steam_pct": 55.9}, {"name": "350 Park Avenue", "address": "340 PARK AVENUE", "type": "Office", "sqft": 545962, "peak_mw": 1.45, "avg_mw": 1.07, "lat": 40.757966, "lon": -73.973423, "status": "ready", "cooling_towers": 3, "steam_pct": 33.3}, {"name": "3 Park Avenue", "address": "3 Park Avenue", "type": "Office", "sqft": 1205501, "peak_mw": 1.43, "avg_mw": 0.93, "lat": 40.746744, "lon": -73.981576, "status": "ready", "cooling_towers": 1, "steam_pct": 52.3}, {"name": "555 West 57th Street", "address": "555 West 57th Street", "type": "Office", "sqft": 999103, "peak_mw": 1.41, "avg_mw": 0.92, "lat": 40.770009, "lon": -73.990657, "status": "ready", "cooling_towers": 1, "steam_pct": 38.3}, {"name": "623 5th Avenue", "address": "623 5th Avenue", "type": "Retail Store", "sqft": 1042944, "peak_mw": 1.4, "avg_mw": 0.92, "lat": 40.758073, "lon": -73.976364, "status": "offline", "cooling_towers": 2, "steam_pct": 38.5}, {"name": "909 Third Avenue", "address": "897 3 AVENUE", "type": "Office", "sqft": 1261897, "peak_mw": 1.38, "avg_mw": 0.96, "lat": 40.758417, "lon": -73.968856, "status": "responding", "cooling_towers": 2, "steam_pct": 43.4}, {"name": "DEPM 1638 - 111 West 57th Street", "address": "111 West 57th Street", "type": "Multifamily Housing", "sqft": 572348, "peak_mw": 1.34, "avg_mw": 0.92, "lat": 40.764562, "lon": -73.977745, "status": "responding", "cooling_towers": 0, "steam_pct": 61.5}, {"name": "150 William Street -Manhattan", "address": "150 William Street", "type": "Office", "sqft": 463679, "peak_mw": 1.33, "avg_mw": 0.97, "lat": 40.709729, "lon": -74.006255, "status": "ready", "cooling_towers": 1, "steam_pct": 64.6}, {"name": "02-1-New York Head Office", "address": "33 Liberty Street", "type": "Office", "sqft": 870210, "peak_mw": 1.32, "avg_mw": 1.05, "lat": 40.708157, "lon": -74.00879, "status": "responding", "cooling_towers": 6, "steam_pct": 50.8}, {"name": "230 Park Avenue", "address": "230 Park Ave", "type": "Office", "sqft": 1280745, "peak_mw": 1.32, "avg_mw": 1.04, "lat": 40.754508, "lon": -73.975951, "status": "ready", "cooling_towers": 3, "steam_pct": 55.7}, {"name": "14 Wall Street", "address": "14 Wall Street", "type": "Office", "sqft": 1087770, "peak_mw": 1.3, "avg_mw": 0.46, "lat": 40.707347, "lon": -74.010997, "status": "ready", "cooling_towers": 1, "steam_pct": 62.7}, {"name": "JEMB - 75 Broad St", "address": "61 BROAD STREET", "type": "Office", "sqft": 671172, "peak_mw": 1.29, "avg_mw": 0.74, "lat": 40.704915, "lon": -74.011538, "status": "offline", "cooling_towers": 1, "steam_pct": 28.4}, {"name": "437 Madison Avenue", "address": "437 Madison Avenue", "type": "Office", "sqft": 857435, "peak_mw": 1.28, "avg_mw": 0.86, "lat": 40.757519, "lon": -73.975827, "status": "responding", "cooling_towers": 1, "steam_pct": 58.5}, {"name": "Gouverneur Gardens Housing Residential and Retail", "address": "25 Montgomery Street", "type": "Multifamily Housing", "sqft": 814552, "peak_mw": 1.27, "avg_mw": 0.78, "lat": 40.713434, "lon": -73.985077, "status": "ready", "cooling_towers": 0, "steam_pct": 71.8}, {"name": "645 5th Avenue", "address": "641 5th Avenue", "type": "Mixed Use Property", "sqft": 934646, "peak_mw": 1.25, "avg_mw": 0.8, "lat": 40.759078, "lon": -73.976281, "status": "responding", "cooling_towers": 1, "steam_pct": 56.5}, {"name": "NYSE 11 Wall - City Filing", "address": "11 Wall St", "type": "Financial Office", "sqft": 334563, "peak_mw": 1.23, "avg_mw": 0.66, "lat": 40.707399, "lon": -74.011105, "status": "responding", "cooling_towers": 4, "steam_pct": 33.1}, {"name": "135 West 50th St.-RDA", "address": "135 West 50th St.", "type": "Office", "sqft": 751395, "peak_mw": 1.23, "avg_mw": 0.95, "lat": 40.760374, "lon": -73.981533, "status": "responding", "cooling_towers": 1, "steam_pct": 61.7}, {"name": "DEPM 1174 - 212 West 18th Street", "address": "206 West 18 Street", "type": "Multifamily Housing", "sqft": 315455, "peak_mw": 1.23, "avg_mw": 0.88, "lat": 40.741281, "lon": -73.998412, "status": "ready", "cooling_towers": 1, "steam_pct": 30.3}, {"name": "245 Park Avenue", "address": "245 Park Avenue", "type": "Office", "sqft": 1577612, "peak_mw": 1.23, "avg_mw": 0.64, "lat": 40.754826, "lon": -73.975683, "status": "ready", "cooling_towers": 2, "steam_pct": 44.5}, {"name": "Feil - 551 Fifth Avenue", "address": "547 5 Avenue", "type": "Office", "sqft": 438254, "peak_mw": 1.23, "avg_mw": 0.88, "lat": 40.755439, "lon": -73.979448, "status": "ready", "cooling_towers": 1, "steam_pct": 39.5}, {"name": "Evelyn H. Lauder Breast and Imaging Center", "address": "300 E 65 St", "type": "Other - Specialty Hospital", "sqft": 233086, "peak_mw": 1.22, "avg_mw": 0.76, "lat": 40.764209, "lon": -73.961258, "status": "ready", "cooling_towers": 2, "steam_pct": 51.8}, {"name": "770 Broadway", "address": "770 BROADWAY", "type": "Office", "sqft": 1093389, "peak_mw": 1.21, "avg_mw": 0.64, "lat": 40.730842, "lon": -73.991402, "status": "ready", "cooling_towers": 1, "steam_pct": 28.0}, {"name": "180 Maiden Lane", "address": "180 Maiden Lane", "type": "Office", "sqft": 1189698, "peak_mw": 1.19, "avg_mw": 0.87, "lat": 40.705308, "lon": -74.004873, "status": "offline", "cooling_towers": 4, "steam_pct": 49.5}, {"name": "DCAS_1022_Louis J. Lefkowitz Building", "address": "80 Centre St", "type": "Office", "sqft": 472500, "peak_mw": 1.18, "avg_mw": 0.84, "lat": 40.715447, "lon": -74.00189, "status": "responding", "cooling_towers": 0, "steam_pct": 48.2}, {"name": "WCMC - S & Imaging", "address": "511 East 71st Street", "type": "Laboratory", "sqft": 116189, "peak_mw": 1.18, "avg_mw": 0.9, "lat": 40.766059, "lon": -73.953969, "status": "ready", "cooling_towers": 0, "steam_pct": 65.7}, {"name": "1185 Ave of the Americas", "address": "1185 Avenue of the Americas", "type": "Office", "sqft": 1065089, "peak_mw": 1.16, "avg_mw": 0.62, "lat": 40.757586, "lon": -73.982125, "status": "responding", "cooling_towers": 1, "steam_pct": 45.8}, {"name": "59 Maiden Lane", "address": "59 Maiden Lane", "type": "Office", "sqft": 1073000, "peak_mw": 1.13, "avg_mw": 0.6, "lat": 40.708266, "lon": -74.008231, "status": "ready", "cooling_towers": 1, "steam_pct": 49.3}, {"name": "90 Park Avenue", "address": "86 PARK AVENUE", "type": "Office", "sqft": 908669, "peak_mw": 1.13, "avg_mw": 0.71, "lat": 40.750377, "lon": -73.978955, "status": "responding", "cooling_towers": 1, "steam_pct": 51.8}, {"name": "Brodsky - 200 W 60th Street", "address": "200 West 60th Street", "type": "Multifamily Housing", "sqft": 375227, "peak_mw": 1.12, "avg_mw": 0.76, "lat": 40.771137, "lon": -73.98736, "status": "ready", "cooling_towers": 1, "steam_pct": 46.2}, {"name": "LCPA - Rose Building", "address": "131 Amsterdam Avenue", "type": "Mixed Use Property", "sqft": 360554, "peak_mw": 1.11, "avg_mw": 0.79, "lat": 40.774505, "lon": -73.984619, "status": "ready", "cooling_towers": 0, "steam_pct": 46.9}, {"name": "1 Central Park West", "address": "1 Central Park West", "type": "Multifamily Housing", "sqft": 618334, "peak_mw": 1.1, "avg_mw": 0.72, "lat": 40.768529, "lon": -73.981588, "status": "ready", "cooling_towers": 1, "steam_pct": 58.6}, {"name": "Wavecrest - CAMPUS - 131 Broome - 17 Pitt - 460 Grand", "address": "17 Pitt Street", "type": "Multifamily Housing", "sqft": 443501, "peak_mw": 1.09, "avg_mw": 0.66, "lat": 40.716088, "lon": -73.984092, "status": "ready", "cooling_towers": 0, "steam_pct": 74.6}, {"name": "Henry Phipps Plaza South", "address": "330 E. 26th Street", "type": "Multifamily Housing", "sqft": 466658, "peak_mw": 1.08, "avg_mw": 0.63, "lat": 40.739135, "lon": -73.977981, "status": "ready", "cooling_towers": 0, "steam_pct": 73.2}, {"name": "DCAS_1011_Manhattan Municipal Building", "address": "1 Centre St", "type": "Office", "sqft": 1070800, "peak_mw": 1.05, "avg_mw": 0.81, "lat": 40.713001, "lon": -74.004181, "status": "ready", "cooling_towers": 2, "steam_pct": 83.1}, {"name": "345 E 37th St", "address": "345 E 37th St", "type": "Medical Office", "sqft": 924200, "peak_mw": 1.05, "avg_mw": 0.74, "lat": 40.746037, "lon": -73.972944, "status": "responding", "cooling_towers": 1, "steam_pct": 56.9}, {"name": "345 E 37th St", "address": "345 E 37th St", "type": "Medical Office", "sqft": 924200, "peak_mw": 1.05, "avg_mw": 0.74, "lat": 40.746037, "lon": -73.972944, "status": "ready", "cooling_towers": 1, "steam_pct": 56.6}, {"name": "M485 (OECID: 0100994; BBL: 1011560030)", "address": "100 Amsterdam Avenue", "type": "K-12 School", "sqft": 401020, "peak_mw": 1.05, "avg_mw": 0.62, "lat": 40.773629, "lon": -73.985273, "status": "ready", "cooling_towers": 3, "steam_pct": 59.6}, {"name": "90 Church Street (74 CHURCH STREET)", "address": "90 CHURCH STREET", "type": "Office", "sqft": 982536, "peak_mw": 1.04, "avg_mw": 0.65, "lat": 40.712586, "lon": -74.009775, "status": "offline", "cooling_towers": 1, "steam_pct": 39.4}, {"name": "115 East 57 Street", "address": "115 East 57 Street", "type": "Multifamily Housing", "sqft": 521139, "peak_mw": 1.04, "avg_mw": 0.63, "lat": 40.7613, "lon": -73.969996, "status": "ready", "cooling_towers": 1, "steam_pct": 64.3}, {"name": "GOMPERS", "address": "100 PITT STREET", "type": "Multifamily Housing", "sqft": 507460, "peak_mw": 1.03, "avg_mw": 0.62, "lat": 40.71942, "lon": -73.981937, "status": "ready", "cooling_towers": 0, "steam_pct": 73.8}, {"name": "333 E. 38th St", "address": "333 E. 38th St", "type": "Medical Office", "sqft": 404375, "peak_mw": 1.02, "avg_mw": 0.8, "lat": 40.746756, "lon": -73.972727, "status": "ready", "cooling_towers": 2, "steam_pct": 54.5}, {"name": "00601-New York, NY", "address": "611 Fifth Avenue", "type": "Retail Store", "sqft": 661000, "peak_mw": 1.02, "avg_mw": 0.74, "lat": 40.758002, "lon": -73.977577, "status": "ready", "cooling_towers": 2, "steam_pct": 21.6}, {"name": "NH MEETH Campus", "address": "208-222 East 64th Street", "type": "Other - Specialty Hospital", "sqft": 235075, "peak_mw": 1.0, "avg_mw": 0.72, "lat": 40.764479, "lon": -73.963839, "status": "responding", "cooling_towers": 0, "steam_pct": 65.2}, {"name": "757 3rd Avenue", "address": "757 3rd Avenue", "type": "Office", "sqft": 407767, "peak_mw": 1.0, "avg_mw": 0.65, "lat": 40.754035, "lon": -73.972056, "status": "responding", "cooling_towers": 2, "steam_pct": 43.7}, {"name": "Archdiocese of NY - 1011 1st Ave", "address": "1011 1st Ave", "type": "Office", "sqft": 379996, "peak_mw": 1.0, "avg_mw": 0.65, "lat": 40.757271, "lon": -73.963692, "status": "ready", "cooling_towers": 1, "steam_pct": 40.0}, {"name": "New York Blood Center", "address": "310 East 67th Street", "type": "Laboratory", "sqft": 140552, "peak_mw": 0.97, "avg_mw": 0.68, "lat": 40.765386, "lon": -73.960171, "status": "ready", "cooling_towers": 1, "steam_pct": 71.0}, {"name": "OCME_294_Manhattan Chief Medical Examiner", "address": "520 1st Ave", "type": "Office", "sqft": 90456, "peak_mw": 0.96, "avg_mw": 0.75, "lat": 40.741451, "lon": -73.975201, "status": "ready", "cooling_towers": 2, "steam_pct": 47.7}, {"name": "2 United Nations Plaza", "address": "2 United Nations Plaza", "type": "Office", "sqft": 565000, "peak_mw": 0.96, "avg_mw": 0.68, "lat": 40.750634, "lon": -73.970105, "status": "offline", "cooling_towers": 1, "steam_pct": 52.9}, {"name": "888 Seventh Avenue", "address": "888 7 AVENUE", "type": "Office", "sqft": 907527, "peak_mw": 0.94, "avg_mw": 0.51, "lat": 40.765015, "lon": -73.980416, "status": "ready", "cooling_towers": 1, "steam_pct": 42.4}, {"name": "1700 Broadway", "address": "824 7 Avenue", "type": "Office", "sqft": 569740, "peak_mw": 0.94, "avg_mw": 0.5, "lat": 40.763067, "lon": -73.981835, "status": "offline", "cooling_towers": 1, "steam_pct": 54.1}, {"name": "Luxury Collection -RDA", "address": "151 West 54th Street", "type": "Hotel", "sqft": 530452, "peak_mw": 0.94, "avg_mw": 0.56, "lat": 40.763245, "lon": -73.980582, "status": "responding", "cooling_towers": 2, "steam_pct": 56.7}, {"name": "10 Grand Central (708 3rd Ave / 153 E 44th St)", "address": "153 EAST 44 STREET", "type": "Office", "sqft": 395800, "peak_mw": 0.94, "avg_mw": 0.65, "lat": 40.752397, "lon": -73.974266, "status": "ready", "cooling_towers": 1, "steam_pct": 41.1}, {"name": "West Side", "address": "5 West 63rd St", "type": "Mixed Use Property", "sqft": 294900, "peak_mw": 0.92, "avg_mw": 0.68, "lat": 40.770689, "lon": -73.980465, "status": "responding", "cooling_towers": 0, "steam_pct": 63.8}, {"name": "757 Third Avenue (Brightly)", "address": "757 Third Avenue", "type": "Office", "sqft": 504630, "peak_mw": 0.91, "avg_mw": 0.67, "lat": 40.754035, "lon": -73.972056, "status": "responding", "cooling_towers": 2, "steam_pct": 43.8}, {"name": "175 West 87th St aka 567-569 Amsterdam Avenue", "address": "561 Amsterdam Ave", "type": "Multifamily Housing", "sqft": 324992, "peak_mw": 0.91, "avg_mw": 0.6, "lat": 40.788449, "lon": -73.974443, "status": "ready", "cooling_towers": 0, "steam_pct": 69.2}, {"name": "Rockefeller University Residential - Faculty&Scholars", "address": "500-518 E. 63rd Street", "type": "Multifamily Housing", "sqft": 787420, "peak_mw": 0.89, "avg_mw": 0.52, "lat": 40.760933, "lon": -73.957748, "status": "ready", "cooling_towers": 0, "steam_pct": 69.5}, {"name": "2250-Park Lane Hotel", "address": "36 Central Park South", "type": "Hotel", "sqft": 453076, "peak_mw": 0.88, "avg_mw": 0.77, "lat": 40.765053, "lon": -73.974795, "status": "responding", "cooling_towers": 1, "steam_pct": 69.6}, {"name": "AKAM - 205 West End Avenue", "address": "205 West End Avenue", "type": "Multifamily Housing", "sqft": 650325, "peak_mw": 0.88, "avg_mw": 0.53, "lat": 40.778573, "lon": -73.986377, "status": "ready", "cooling_towers": 0, "steam_pct": 66.6}, {"name": "1407 Broadway", "address": "1407 Broadway", "type": "Office", "sqft": 1114695, "peak_mw": 0.88, "avg_mw": 0.38, "lat": 40.753439, "lon": -73.987151, "status": "ready", "cooling_towers": 1, "steam_pct": 57.1}, {"name": "Hahn Kook Center", "address": "460 Park Avenue", "type": "Office", "sqft": 322721, "peak_mw": 0.88, "avg_mw": 0.53, "lat": 40.761783, "lon": -73.970638, "status": "ready", "cooling_towers": 1, "steam_pct": 42.5}, {"name": "H+H_4278_Gouverneur Health Care Services", "address": "227 Madison St", "type": "Urgent Care/Clinic/Other Outpatient", "sqft": 466012, "peak_mw": 0.87, "avg_mw": 0.68, "lat": 40.712784, "lon": -73.988417, "status": "offline", "cooling_towers": 3, "steam_pct": 65.1}, {"name": "APF - 28 West 44th Street", "address": "23 WEST 43 STREET", "type": "Office", "sqft": 313039, "peak_mw": 0.87, "avg_mw": 0.59, "lat": 40.75458, "lon": -73.981379, "status": "responding", "cooling_towers": 1, "steam_pct": 55.8}, {"name": "Shmaya Glick: 22 Cortlandt Street", "address": "22 Cortlandt Street", "type": "Office", "sqft": 693226, "peak_mw": 0.87, "avg_mw": 0.47, "lat": 40.710223, "lon": -74.010897, "status": "ready", "cooling_towers": 2, "steam_pct": 45.2}, {"name": "500 Fifth Ave", "address": "500 5 AVENUE", "type": "Office", "sqft": 729477, "peak_mw": 0.86, "avg_mw": 0.6, "lat": 40.753543, "lon": -73.980856, "status": "ready", "cooling_towers": 1, "steam_pct": 41.4}, {"name": "422 East 72nd St", "address": "422 E. 72ND ST.", "type": "Multifamily Housing", "sqft": 363095, "peak_mw": 0.86, "avg_mw": 0.59, "lat": 40.767372, "lon": -73.954993, "status": "ready", "cooling_towers": 1, "steam_pct": 67.0}, {"name": "NH MEETH 222 E64th St 1087753", "address": "222 East 64th Street", "type": "Other - Specialty Hospital", "sqft": 95061, "peak_mw": 0.86, "avg_mw": 0.68, "lat": 40.764383, "lon": -73.963615, "status": "responding", "cooling_towers": 1, "steam_pct": 67.6}, {"name": "Wallack - 120 East 87th Street", "address": "114 EAST 87 STREET", "type": "Multifamily Housing", "sqft": 409222, "peak_mw": 0.86, "avg_mw": 0.55, "lat": 40.780566, "lon": -73.956046, "status": "responding", "cooling_towers": 1, "steam_pct": 53.3}, {"name": "Ura Group - 88 Pine Street", "address": "88 Pine Street", "type": "Office", "sqft": 664990, "peak_mw": 0.85, "avg_mw": 0.49, "lat": 40.70536, "lon": -74.00629, "status": "ready", "cooling_towers": 1, "steam_pct": 67.4}, {"name": "685 Third Avenue", "address": "685 Third Ave", "type": "Office", "sqft": 602329, "peak_mw": 0.85, "avg_mw": 0.5, "lat": 40.751617, "lon": -73.973819, "status": "responding", "cooling_towers": 1, "steam_pct": 37.4}, {"name": "730 3rd Avenue - LL84, LL97 filings", "address": "720 3 Avenue", "type": "Office", "sqft": 678947, "peak_mw": 0.85, "avg_mw": 0.53, "lat": 40.752792, "lon": -73.972988, "status": "responding", "cooling_towers": 1, "steam_pct": 36.6}, {"name": "185 WEA (185 West End Avenue)", "address": "185 West End Avenue", "type": "Multifamily Housing", "sqft": 449713, "peak_mw": 0.85, "avg_mw": 0.51, "lat": 40.777612, "lon": -73.986092, "status": "ready", "cooling_towers": 0, "steam_pct": 72.7}, {"name": "666 Third Avenue (Chrysler East)", "address": "666 Third Avenue", "type": "Office", "sqft": 784116, "peak_mw": 0.83, "avg_mw": 0.43, "lat": 40.751049, "lon": -73.974252, "status": "responding", "cooling_towers": 7, "steam_pct": 39.4}, {"name": "40 Wall Street", "address": "40 Wall Street", "type": "Office", "sqft": 1155995, "peak_mw": 0.83, "avg_mw": 0.47, "lat": 40.706784, "lon": -74.010132, "status": "ready", "cooling_towers": 1, "steam_pct": 46.7}, {"name": "DEPM 1644 - 188 East 64th St", "address": "1066 3 Avenue", "type": "Multifamily Housing", "sqft": 255961, "peak_mw": 0.81, "avg_mw": 0.55, "lat": 40.764155, "lon": -73.964699, "status": "responding", "cooling_towers": 1, "steam_pct": 64.3}, {"name": "485 Lexington Avenue", "address": "485 Lexington Avenue", "type": "Office", "sqft": 855270, "peak_mw": 0.81, "avg_mw": 0.52, "lat": 40.754244, "lon": -73.973994, "status": "ready", "cooling_towers": 1, "steam_pct": 42.6}, {"name": "NYEEI South Bldg", "address": "218 2nd Avenue", "type": "Hospital (General Medical & Surgical)", "sqft": 78156, "peak_mw": 0.81, "avg_mw": 0.64, "lat": 40.73184, "lon": -73.985304, "status": "ready", "cooling_towers": 0, "steam_pct": 47.8}, {"name": "11 Broadway -Manhattan", "address": "11 Broadway", "type": "Office", "sqft": 434220, "peak_mw": 0.8, "avg_mw": 0.6, "lat": 40.705354, "lon": -74.013731, "status": "ready", "cooling_towers": 2, "steam_pct": 52.3}, {"name": "Paramount Hotel by Generator", "address": "235 West 46th Street", "type": "Hotel", "sqft": 222179, "peak_mw": 0.8, "avg_mw": 0.57, "lat": 40.759132, "lon": -73.986348, "status": "ready", "cooling_towers": 1, "steam_pct": 65.4}, {"name": "200 Madison Avenue-RDA", "address": "200 Madison Avenue", "type": "Office", "sqft": 659245, "peak_mw": 0.8, "avg_mw": 0.47, "lat": 40.748528, "lon": -73.982413, "status": "responding", "cooling_towers": 1, "steam_pct": 46.0}, {"name": "Feil - 570 Lexington Avenue", "address": "570 Lexington Avenue", "type": "Office", "sqft": 554277, "peak_mw": 0.79, "avg_mw": 0.37, "lat": 40.756925, "lon": -73.972066, "status": "responding", "cooling_towers": 1, "steam_pct": 48.2}, {"name": "777 Third Avenue", "address": "777 Third Avenue", "type": "Office", "sqft": 555264, "peak_mw": 0.78, "avg_mw": 0.52, "lat": 40.75466, "lon": -73.971598, "status": "responding", "cooling_towers": 3, "steam_pct": 42.8}, {"name": "Kato International LLC Current", "address": "12 East 49th Street", "type": "Office", "sqft": 598088, "peak_mw": 0.78, "avg_mw": 0.33, "lat": 40.757642, "lon": -73.977043, "status": "ready", "cooling_towers": 1, "steam_pct": 42.2}, {"name": "2455-M Social New York (CHILD)", "address": "1651 Broadway", "type": "Hotel", "sqft": 387010, "peak_mw": 0.77, "avg_mw": 0.48, "lat": 40.762164, "lon": -73.983575, "status": "ready", "cooling_towers": 1, "steam_pct": 46.8}, {"name": "LL84 - TRB (227 E 30th S)", "address": "227 East 30th St", "type": "Data Center", "sqft": 203238, "peak_mw": 0.76, "avg_mw": 0.56, "lat": 40.742695, "lon": -73.978705, "status": "responding", "cooling_towers": 2, "steam_pct": 44.0}, {"name": "Allied - Vanderbilt - Parent", "address": "235 EAST 40 STREET; 240 GARAGE EAST 41 STREET", "type": "Multifamily Housing", "sqft": 350328, "peak_mw": 0.76, "avg_mw": 0.52, "lat": 40.748864, "lon": -73.973892, "status": "offline", "cooling_towers": 0, "steam_pct": 52.6}, {"name": "CO/GLC 18137/230 W 36 ST/NEW YORK/NY", "address": "230 W 36 ST", "type": "Data Center", "sqft": 293739, "peak_mw": 0.75, "avg_mw": 0.56, "lat": 40.752709, "lon": -73.990731, "status": "ready", "cooling_towers": 7, "steam_pct": 75.8}, {"name": "CUNY CC > BMCC_61_BMCC: Chambers St. Building", "address": "199 Chambers St", "type": "College/University", "sqft": 723777, "peak_mw": 0.74, "avg_mw": 0.36, "lat": 40.716838, "lon": -74.012117, "status": "ready", "cooling_towers": 1, "steam_pct": 43.2}, {"name": "Sofitel Hotel", "address": "43 West 44th Street", "type": "Hotel", "sqft": 280328, "peak_mw": 0.72, "avg_mw": 0.52, "lat": 40.755401, "lon": -73.981386, "status": "ready", "cooling_towers": 1, "steam_pct": 56.1}, {"name": "NYLS-New York Law Campus", "address": "185 West Broadway", "type": "College/University", "sqft": 344852, "peak_mw": 0.72, "avg_mw": 0.47, "lat": 40.718175, "lon": -74.007114, "status": "responding", "cooling_towers": 0, "steam_pct": 41.3}, {"name": "NH Lenox Health, Greenwich Village", "address": "20-40 7th Avenue", "type": "Urgent Care/Clinic/Other Outpatient", "sqft": 160000, "peak_mw": 0.72, "avg_mw": 0.53, "lat": 40.737328, "lon": -74.000585, "status": "responding", "cooling_towers": 0, "steam_pct": 51.9}, {"name": "810 Seventh Avenue", "address": "1680 Broadway", "type": "Office", "sqft": 723473, "peak_mw": 0.71, "avg_mw": 0.37, "lat": 40.763034, "lon": -73.983005, "status": "ready", "cooling_towers": 1, "steam_pct": 50.1}, {"name": "CBS-518", "address": "518 W57th St", "type": "Office", "sqft": 121635, "peak_mw": 0.71, "avg_mw": 0.51, "lat": 40.769617, "lon": -73.989769, "status": "ready", "cooling_towers": 0, "steam_pct": 30.9}, {"name": "2 Times Square", "address": "712 7th Avenue", "type": "Hotel", "sqft": 233561, "peak_mw": 0.71, "avg_mw": 0.36, "lat": 40.759527, "lon": -73.984406, "status": "ready", "cooling_towers": 1, "steam_pct": 35.7}, {"name": "URA Group - 10 East 40th Street", "address": "10 East 40th Street", "type": "Office", "sqft": 430070, "peak_mw": 0.71, "avg_mw": 0.41, "lat": 40.751879, "lon": -73.981091, "status": "ready", "cooling_towers": 1, "steam_pct": 50.8}, {"name": "641 Lexington Avenue", "address": "641 Lexington Avenue", "type": "Office", "sqft": 445690, "peak_mw": 0.71, "avg_mw": 0.47, "lat": 40.75903, "lon": -73.970321, "status": "responding", "cooling_towers": 1, "steam_pct": 43.2}, {"name": "BROADWAY 2024 PROPCO LLC", "address": "222 BROADWAY", "type": "Office", "sqft": 756138, "peak_mw": 0.71, "avg_mw": 0.49, "lat": 40.711313, "lon": -74.008661, "status": "ready", "cooling_towers": 1, "steam_pct": 47.3}, {"name": "Peninsula NY", "address": "695 5th Avenue", "type": "Hotel", "sqft": 282585, "peak_mw": 0.7, "avg_mw": 0.53, "lat": 40.76132, "lon": -73.975158, "status": "ready", "cooling_towers": 1, "steam_pct": 46.3}, {"name": "124110 1370 Avenue of the Americas", "address": "1370 Avenue of the Americas", "type": "Office", "sqft": 311501, "peak_mw": 0.7, "avg_mw": 0.47, "lat": 40.763363, "lon": -73.977373, "status": "ready", "cooling_towers": 1, "steam_pct": 43.4}, {"name": "150 East  58th Street", "address": "146 EAST 58 STREET", "type": "Mixed Use Property", "sqft": 593382, "peak_mw": 0.69, "avg_mw": 0.46, "lat": 40.761434, "lon": -73.968266, "status": "responding", "cooling_towers": 2, "steam_pct": 57.9}, {"name": "One Dag Hammarskjold Plaza", "address": "883 Second Avenue", "type": "Office", "sqft": 771118, "peak_mw": 0.69, "avg_mw": 0.48, "lat": 40.753145, "lon": -73.969794, "status": "ready", "cooling_towers": 1, "steam_pct": 57.4}, {"name": "DEPM 2568 - 435 East 52nd Street", "address": "433 East 52 Street", "type": "Multifamily Housing", "sqft": 464886, "peak_mw": 0.68, "avg_mw": 0.44, "lat": 40.754776, "lon": -73.964389, "status": "ready", "cooling_towers": 1, "steam_pct": 67.2}, {"name": "1375 Broadway, New York, NY 10018, USA", "address": "1375 Broadway", "type": "Office", "sqft": 464927, "peak_mw": 0.68, "avg_mw": 0.43, "lat": 40.752328, "lon": -73.987461, "status": "offline", "cooling_towers": 1, "steam_pct": 46.4}, {"name": "320 East 23rd Street", "address": "320 E. 23Rd Street", "type": "Multifamily Housing", "sqft": 153800, "peak_mw": 0.68, "avg_mw": 0.46, "lat": 40.737571, "lon": -73.980179, "status": "responding", "cooling_towers": 0, "steam_pct": 62.1}, {"name": "FULTON - Bldgs 1-4", "address": "401 WEST 16TH STREET", "type": "Multifamily Housing", "sqft": 322060, "peak_mw": 0.68, "avg_mw": 0.41, "lat": 40.742321, "lon": -74.004478, "status": "ready", "cooling_towers": 0, "steam_pct": 92.1}, {"name": "101 Avenue of the Americas (95 6 AVENUE)", "address": "95 6 AVENUE", "type": "Office", "sqft": 416948, "peak_mw": 0.66, "avg_mw": 0.27, "lat": 40.723077, "lon": -74.005029, "status": "ready", "cooling_towers": 1, "steam_pct": 28.4}, {"name": "417 Fifth Avenue", "address": "417 Fifth Avenue", "type": "Office", "sqft": 423771, "peak_mw": 0.66, "avg_mw": 0.48, "lat": 40.750691, "lon": -73.982907, "status": "ready", "cooling_towers": 1, "steam_pct": 60.7}, {"name": "InterContinental Hotel: 111 East 48th St", "address": "111 East 48th Street", "type": "Hotel", "sqft": 450111, "peak_mw": 0.64, "avg_mw": 0.49, "lat": 40.75555, "lon": -73.973979, "status": "ready", "cooling_towers": 2, "steam_pct": 54.4}, {"name": "57 West 57th Street", "address": "57 West 57th Street", "type": "Office", "sqft": 159168, "peak_mw": 0.64, "avg_mw": 0.54, "lat": 40.763719, "lon": -73.975741, "status": "ready", "cooling_towers": 1, "steam_pct": 21.7}, {"name": "Evolution - 135 W 45th St (Hyatt Times Square New York)", "address": "135 W 45th St", "type": "Hotel", "sqft": 304831, "peak_mw": 0.64, "avg_mw": 0.44, "lat": 40.757251, "lon": -73.983815, "status": "ready", "cooling_towers": 0, "steam_pct": 46.2}, {"name": "Stonehenge - 165 East 66th Street", "address": "1130 3rd Avenue", "type": "Multifamily Housing", "sqft": 255371, "peak_mw": 0.64, "avg_mw": 0.44, "lat": 40.766013, "lon": -73.96334, "status": "ready", "cooling_towers": 1, "steam_pct": 78.3}, {"name": "Halstead - 500 Park Avenue - RES - CHILD", "address": "56 EAST 59 STREET", "type": "Multifamily Housing", "sqft": 245468, "peak_mw": 0.64, "avg_mw": 0.41, "lat": 40.763336, "lon": -73.970829, "status": "ready", "cooling_towers": 0, "steam_pct": 51.2}, {"name": "63 Madison Avenue-RDA", "address": "63 Madison Ave", "type": "Office", "sqft": 786069, "peak_mw": 0.63, "avg_mw": 0.39, "lat": 40.743478, "lon": -73.98607, "status": "ready", "cooling_towers": 1, "steam_pct": 64.5}, {"name": "Vanderbilt", "address": "224 East 47th St", "type": "Fitness Center/Health Club/Gym", "sqft": 159528, "peak_mw": 0.63, "avg_mw": 0.46, "lat": 40.753634, "lon": -73.971418, "status": "responding", "cooling_towers": 1, "steam_pct": 69.5}, {"name": "56 Leonard", "address": "56 Leonard Street", "type": "Multifamily Housing", "sqft": 488973, "peak_mw": 0.63, "avg_mw": 0.31, "lat": 40.717898, "lon": -74.006273, "status": "ready", "cooling_towers": 0, "steam_pct": 53.3}, {"name": "Westgate New York Grand Central", "address": "302-304 East 42Nd Street", "type": "Hotel", "sqft": 141758, "peak_mw": 0.62, "avg_mw": 0.46, "lat": 40.74969, "lon": -73.971903, "status": "responding", "cooling_towers": 1, "steam_pct": 51.6}, {"name": "Wise Towers", "address": "109 W. 90Th Street", "type": "Multifamily Housing", "sqft": 392411, "peak_mw": 0.62, "avg_mw": 0.36, "lat": 40.789274, "lon": -73.970806, "status": "responding", "cooling_towers": 0, "steam_pct": 65.1}, {"name": "(8003) - Park Towers Tenants Corp (201 East 17th Street)", "address": "201 East 17th Street", "type": "Multifamily Housing", "sqft": 269220, "peak_mw": 0.62, "avg_mw": 0.41, "lat": 40.735052, "lon": -73.985411, "status": "ready", "cooling_towers": 0, "steam_pct": 68.6}, {"name": "533 and 521 WEST 57 STREET : [521-533 West 57th St.]", "address": "533 WEST 57 STREET", "type": "Office", "sqft": 423251, "peak_mw": 0.61, "avg_mw": 0.46, "lat": 40.769614, "lon": -73.989722, "status": "ready", "cooling_towers": 1, "steam_pct": 58.0}, {"name": "CBRE - 110 William Street", "address": "100 William Street", "type": "Office", "sqft": 788241, "peak_mw": 0.61, "avg_mw": 0.34, "lat": 40.708497, "lon": -74.007477, "status": "responding", "cooling_towers": 1, "steam_pct": 50.7}, {"name": "1334 York Avenue", "address": "1334 York Avenue", "type": "Mixed Use Property", "sqft": 403660, "peak_mw": 0.6, "avg_mw": 0.43, "lat": 40.766315, "lon": -73.954127, "status": "ready", "cooling_towers": 1, "steam_pct": 38.8}, {"name": "41 Madison Ave LP", "address": "41 Madison Ave", "type": "Office", "sqft": 562152, "peak_mw": 0.6, "avg_mw": 0.28, "lat": 40.742616, "lon": -73.986698, "status": "ready", "cooling_towers": 1, "steam_pct": 57.5}, {"name": "(8145) - The Cosmopolitan Condominium (145 East 48th Street)", "address": "145 East 48th Street", "type": "Multifamily Housing", "sqft": 210781, "peak_mw": 0.6, "avg_mw": 0.39, "lat": 40.755042, "lon": -73.972774, "status": "offline", "cooling_towers": 0, "steam_pct": 53.0}, {"name": "TMG - 545 Fifth Ave", "address": "545 Fifth Avenue", "type": "Office", "sqft": 171243, "peak_mw": 0.6, "avg_mw": 0.4, "lat": 40.755164, "lon": -73.979188, "status": "ready", "cooling_towers": 0, "steam_pct": 43.0}, {"name": "Ford Foundation - 320 East 43rd", "address": "320 East 43rd Street", "type": "Office", "sqft": 290477, "peak_mw": 0.59, "avg_mw": 0.4, "lat": 40.750156, "lon": -73.970935, "status": "ready", "cooling_towers": 1, "steam_pct": 50.2}, {"name": "370 Lexington Avenue", "address": "364 Lexington Avenue", "type": "Office", "sqft": 245292, "peak_mw": 0.59, "avg_mw": 0.38, "lat": 40.750514, "lon": -73.976739, "status": "responding", "cooling_towers": 1, "steam_pct": 41.0}, {"name": "521 Fifth Avenue", "address": "521 Fifth Avenue", "type": "Office", "sqft": 446045, "peak_mw": 0.58, "avg_mw": 0.4, "lat": 40.754078, "lon": -73.979935, "status": "responding", "cooling_towers": 1, "steam_pct": 47.9}, {"name": "600 Third Avenue", "address": "600 3 AVENUE", "type": "Office", "sqft": 531600, "peak_mw": 0.58, "avg_mw": 0.33, "lat": 40.74898, "lon": -73.975783, "status": "ready", "cooling_towers": 1, "steam_pct": 47.3}, {"name": "CO/VZT/208 E 79 ST/NEW YORK/NY", "address": "208 E 79 ST", "type": "Data Center", "sqft": 146975, "peak_mw": 0.57, "avg_mw": 0.4, "lat": 40.77408, "lon": -73.956837, "status": "ready", "cooling_towers": 1, "steam_pct": 31.4}, {"name": "(7101) - 100 United Nations Plaza Condominium (100 UN Plaza)", "address": "100 UN Plaza", "type": "Multifamily Housing", "sqft": 469819, "peak_mw": 0.57, "avg_mw": 0.35, "lat": 40.753164, "lon": -73.968325, "status": "ready", "cooling_towers": 0, "steam_pct": 77.1}, {"name": "St. Regis - New York", "address": "2 EAST 55TH STREET", "type": "Hotel", "sqft": 427877, "peak_mw": 0.56, "avg_mw": 0.43, "lat": 40.761559, "lon": -73.974681, "status": "ready", "cooling_towers": 3, "steam_pct": 54.0}, {"name": "(8126) - Parkway Village", "address": "81-26 150th Street", "type": "Multifamily Housing", "sqft": 704500, "peak_mw": 0.56, "avg_mw": 0.3, "lat": 40.717983, "lon": -73.81188, "status": "ready", "cooling_towers": 0, "steam_pct": 49.7}, {"name": "05WJG-NYCXR-The St. Regis New York", "address": "2 E. 55th Street", "type": "Hotel", "sqft": 427877, "peak_mw": 0.56, "avg_mw": 0.43, "lat": 40.761559, "lon": -73.974681, "status": "responding", "cooling_towers": 3, "steam_pct": 55.6}, {"name": "Colgate Palmolive Building (300 Park)", "address": "300 Park Avenue", "type": "Office", "sqft": 777658, "peak_mw": 0.56, "avg_mw": 0.38, "lat": 40.756802, "lon": -73.974271, "status": "responding", "cooling_towers": 1, "steam_pct": 41.5}, {"name": "250 Broadway", "address": "250 Broadway", "type": "Office", "sqft": 592893, "peak_mw": 0.55, "avg_mw": 0.38, "lat": 40.712982, "lon": -74.007301, "status": "offline", "cooling_towers": 1, "steam_pct": 63.1}, {"name": "160 Water St", "address": "160 Water St", "type": "Office", "sqft": 481819, "peak_mw": 0.55, "avg_mw": 0.38, "lat": 40.706452, "lon": -74.005594, "status": "ready", "cooling_towers": 1, "steam_pct": 83.8}, {"name": "DCAS_1020_Health Building", "address": "125 Worth St", "type": "Office", "sqft": 406109, "peak_mw": 0.55, "avg_mw": 0.38, "lat": 40.715428, "lon": -74.002673, "status": "ready", "cooling_towers": 0, "steam_pct": 56.1}, {"name": "730 Fifth Avenue", "address": "730 Fifth Avenue", "type": "Hotel", "sqft": 346858, "peak_mw": 0.55, "avg_mw": 0.36, "lat": 40.762635, "lon": -73.974222, "status": "ready", "cooling_towers": 1, "steam_pct": 31.8}, {"name": "730 Fifth Avenue", "address": "730 Fifth Avenue", "type": "Office", "sqft": 346858, "peak_mw": 0.55, "avg_mw": 0.36, "lat": 40.762635, "lon": -73.974222, "status": "responding", "cooling_towers": 1, "steam_pct": 39.7}, {"name": "489 5th Avenue", "address": "489 5th Avenue", "type": "Office", "sqft": 167075, "peak_mw": 0.55, "avg_mw": 0.41, "lat": 40.75309, "lon": -73.981159, "status": "ready", "cooling_towers": 1, "steam_pct": 51.3}, {"name": "39 Broadway", "address": "39 Broadway", "type": "Office", "sqft": 447442, "peak_mw": 0.54, "avg_mw": 0.31, "lat": 40.706251, "lon": -74.012952, "status": "ready", "cooling_towers": 1, "steam_pct": 53.0}, {"name": "WCMC - WGC (YAB) Building", "address": "1305 York Ave", "type": "Ambulatory Surgical Center", "sqft": 297500, "peak_mw": 0.54, "avg_mw": 0.41, "lat": 40.765346, "lon": -73.954857, "status": "ready", "cooling_towers": 0, "steam_pct": 55.6}, {"name": "540 Madison Avenue", "address": "540 Madison Avenue", "type": "Office", "sqft": 291173, "peak_mw": 0.54, "avg_mw": 0.3, "lat": 40.761081, "lon": -73.973797, "status": "ready", "cooling_towers": 1, "steam_pct": 47.1}, {"name": "Sherry Netherland - 781 5th Avenue", "address": "781 5th Avenue", "type": "Mixed Use Property", "sqft": 314509, "peak_mw": 0.54, "avg_mw": 0.37, "lat": 40.764454, "lon": -73.972871, "status": "ready", "cooling_towers": 1, "steam_pct": 53.4}, {"name": "950 Third Avenue New York", "address": "950 Third Avenue", "type": "Office", "sqft": 320585, "peak_mw": 0.54, "avg_mw": 0.3, "lat": 40.76016, "lon": -73.967596, "status": "ready", "cooling_towers": 1, "steam_pct": 61.5}, {"name": "Wavecrest CHILD of CAMPUS - 460 Grand St", "address": "444 Grand Street", "type": "Multifamily Housing", "sqft": 265181, "peak_mw": 0.53, "avg_mw": 0.31, "lat": 40.715397, "lon": -73.984842, "status": "responding", "cooling_towers": 0, "steam_pct": 85.7}, {"name": "Triborough Pres LLC (Campos) (2126camp)", "address": "635 East 12th Street", "type": "Multifamily Housing", "sqft": 289613, "peak_mw": 0.52, "avg_mw": 0.3, "lat": 40.727478, "lon": -73.977519, "status": "ready", "cooling_towers": 0, "steam_pct": 38.5}, {"name": "50 UN Plaza", "address": "50 UNITED NATIONS PLZ.", "type": "Multifamily Housing", "sqft": 288541, "peak_mw": 0.51, "avg_mw": 0.32, "lat": 40.7515, "lon": -73.967885, "status": "responding", "cooling_towers": 1, "steam_pct": 57.6}, {"name": "CBRE - 717 5th Ave", "address": "717 5th Ave", "type": "Office", "sqft": 451845, "peak_mw": 0.51, "avg_mw": 0.28, "lat": 40.762135, "lon": -73.974562, "status": "ready", "cooling_towers": 1, "steam_pct": 40.5}, {"name": "AKAM - 301 West 57th Street", "address": "301 West 57th Street", "type": "Multifamily Housing", "sqft": 341429, "peak_mw": 0.51, "avg_mw": 0.17, "lat": 40.766902, "lon": -73.983296, "status": "ready", "cooling_towers": 1, "steam_pct": 48.9}, {"name": "100 East 53rd Street", "address": "100 E. 53RD ST.", "type": "Multifamily Housing", "sqft": 339294, "peak_mw": 0.51, "avg_mw": 0.29, "lat": 40.758816, "lon": -73.972061, "status": "offline", "cooling_towers": 1, "steam_pct": 51.4}, {"name": "2022_Hippodrome- 1120 Avenue of the Americas", "address": "1120 Avenue of the Americas", "type": "Office", "sqft": 617347, "peak_mw": 0.5, "avg_mw": 0.26, "lat": 40.755651, "lon": -73.983516, "status": "responding", "cooling_towers": 1, "steam_pct": 48.0}, {"name": "Copy of 1063 Bergdorf Goodman", "address": "754 5th Avenue", "type": "Retail Store", "sqft": 267610, "peak_mw": 0.5, "avg_mw": 0.32, "lat": 40.763469, "lon": -73.973615, "status": "offline", "cooling_towers": 2, "steam_pct": 20.6}, {"name": "675 Third Ave", "address": "675 3rd Ave", "type": "Office", "sqft": 289356, "peak_mw": 0.49, "avg_mw": 0.18, "lat": 40.750791, "lon": -73.973963, "status": "responding", "cooling_towers": 3, "steam_pct": 62.9}, {"name": "530 Fifth Avenue", "address": "530 5th Ave", "type": "Office", "sqft": 491003, "peak_mw": 0.49, "avg_mw": 0.31, "lat": 40.754879, "lon": -73.979877, "status": "responding", "cooling_towers": 1, "steam_pct": 42.6}, {"name": "Bergdorf Goodman #1063", "address": "4 W 58th St", "type": "Retail Store", "sqft": 61000, "peak_mw": 0.49, "avg_mw": 0.35, "lat": 40.763785, "lon": -73.973788, "status": "ready", "cooling_towers": 1, "steam_pct": 21.4}, {"name": "M460 (OECID: 0100181; BBL: 1008720057)", "address": "40 Irving Place", "type": "K-12 School", "sqft": 450200, "peak_mw": 0.49, "avg_mw": 0.36, "lat": 40.735494, "lon": -73.987659, "status": "ready", "cooling_towers": 0, "steam_pct": 78.2}, {"name": "1063 Bergdorf Goodman", "address": "754 5th Avenue", "type": "Retail Store", "sqft": 267610, "peak_mw": 0.49, "avg_mw": 0.35, "lat": 40.763469, "lon": -73.973615, "status": "ready", "cooling_towers": 2, "steam_pct": 20.4}, {"name": "AMSTERDAM ADDITION", "address": "240 WEST 65TH STREET", "type": "Multifamily Housing", "sqft": 162599, "peak_mw": 0.49, "avg_mw": 0.3, "lat": 40.77484, "lon": -73.986493, "status": "ready", "cooling_towers": 0, "steam_pct": 72.0}, {"name": "AKAM - 400 East 54th Street", "address": "400 East 54th Street", "type": "Multifamily Housing", "sqft": 243945, "peak_mw": 0.49, "avg_mw": 0.3, "lat": 40.756308, "lon": -73.964165, "status": "ready", "cooling_towers": 1, "steam_pct": 73.6}, {"name": "555 Madison Avenue", "address": "555 Madison Ave", "type": "Office", "sqft": 369787, "peak_mw": 0.48, "avg_mw": 0.26, "lat": 40.761177, "lon": -73.973161, "status": "ready", "cooling_towers": 2, "steam_pct": 36.4}, {"name": "Allied - 1423 2nd Avenue - Child", "address": "1423 2 AVENUE", "type": "Multifamily Housing", "sqft": 149793, "peak_mw": 0.48, "avg_mw": 0.32, "lat": 40.770268, "lon": -73.957305, "status": "offline", "cooling_towers": 1, "steam_pct": 41.2}, {"name": "The Salvation Army DHQ", "address": "120 West 14th Street", "type": "Office", "sqft": 182554, "peak_mw": 0.48, "avg_mw": 0.37, "lat": 40.737704, "lon": -73.997676, "status": "ready", "cooling_towers": 2, "steam_pct": 62.8}, {"name": "Tower 53", "address": "825 seventh Ave", "type": "Mixed Use Property", "sqft": 392397, "peak_mw": 0.48, "avg_mw": 0.32, "lat": 40.763155, "lon": -73.981745, "status": "responding", "cooling_towers": 1, "steam_pct": 67.0}, {"name": "600 Madison Avenue", "address": "600 Madison Avenue", "type": "Office", "sqft": 341495, "peak_mw": 0.47, "avg_mw": 0.21, "lat": 40.762629, "lon": -73.972125, "status": "ready", "cooling_towers": 2, "steam_pct": 44.7}, {"name": "595 Madison Avenue", "address": "595 MADISON AVENUE", "type": "Office", "sqft": 314432, "peak_mw": 0.47, "avg_mw": 0.28, "lat": 40.762384, "lon": -73.97228, "status": "ready", "cooling_towers": 2, "steam_pct": 43.6}, {"name": "Century - 233 East 69th Street", "address": "1317 2 AVENUE", "type": "Multifamily Housing", "sqft": 222962, "peak_mw": 0.46, "avg_mw": 0.28, "lat": 40.767091, "lon": -73.959625, "status": "offline", "cooling_towers": 0, "steam_pct": 73.7}, {"name": "Charles H. Greenthal: 233 EAST 69 STREET", "address": "233 EAST 69 STREET", "type": "Multifamily Housing", "sqft": 243717, "peak_mw": 0.46, "avg_mw": 0.28, "lat": 40.767258, "lon": -73.960675, "status": "offline", "cooling_towers": 0, "steam_pct": 73.1}, {"name": "Allied - 138 East 63rd Street", "address": "140 East 63rd Street", "type": "Multifamily Housing", "sqft": 223227, "peak_mw": 0.46, "avg_mw": 0.33, "lat": 40.764592, "lon": -73.966052, "status": "ready", "cooling_towers": 1, "steam_pct": 60.4}, {"name": "650 Fifth Avenue Company", "address": "650 Fifth Avenue", "type": "Office", "sqft": 386379, "peak_mw": 0.46, "avg_mw": 0.25, "lat": 40.759789, "lon": -73.976544, "status": "responding", "cooling_towers": 1, "steam_pct": 30.6}, {"name": "450 Park Avenue", "address": "450 Park Avenue", "type": "Office", "sqft": 314113, "peak_mw": 0.44, "avg_mw": 0.32, "lat": 40.761396, "lon": -73.97092, "status": "ready", "cooling_towers": 1, "steam_pct": 54.2}, {"name": "1350 Ave of the Americas", "address": "1350 Avenue of the Americas", "type": "Office", "sqft": 541850, "peak_mw": 0.44, "avg_mw": 0.23, "lat": 40.762731, "lon": -73.978341, "status": "ready", "cooling_towers": 1, "steam_pct": 56.7}, {"name": "850 Third Avenue (838 3 AVE)", "address": "838 3 AVENUE", "type": "Office", "sqft": 515239, "peak_mw": 0.43, "avg_mw": 0.28, "lat": 40.756551, "lon": -73.970254, "status": "offline", "cooling_towers": 1, "steam_pct": 56.3}, {"name": "1330 Avenue of the Americas", "address": "1330 Avenue of the Americas", "type": "Office", "sqft": 474244, "peak_mw": 0.43, "avg_mw": 0.21, "lat": 40.762103, "lon": -73.978803, "status": "ready", "cooling_towers": 1, "steam_pct": 66.5}, {"name": "2480-Algonquin Hotel", "address": "59 W 44th St.", "type": "Hotel", "sqft": 90169, "peak_mw": 0.42, "avg_mw": 0.26, "lat": 40.755555, "lon": -73.981754, "status": "ready", "cooling_towers": 1, "steam_pct": 53.0}, {"name": "575 Park Ave", "address": "575 Park Ave", "type": "Multifamily Housing", "sqft": 202841, "peak_mw": 0.42, "avg_mw": 0.26, "lat": 40.765219, "lon": -73.968106, "status": "responding", "cooling_towers": 1, "steam_pct": 60.5}, {"name": "AKAM - 10 Park Avenue", "address": "10 Park Avenue", "type": "Multifamily Housing", "sqft": 227098, "peak_mw": 0.42, "avg_mw": 0.28, "lat": 40.747339, "lon": -73.981165, "status": "ready", "cooling_towers": 0, "steam_pct": 70.2}, {"name": "HSS - Caspary Research Center (Pavilion)", "address": "541 E 71st Street", "type": "Medical Office", "sqft": 78589, "peak_mw": 0.42, "avg_mw": 0.32, "lat": 40.765735, "lon": -73.9532, "status": "ready", "cooling_towers": 1, "steam_pct": 48.8}, {"name": "360 Lexington Avenue", "address": "360 Lexington Avenue", "type": "Office", "sqft": 238294, "peak_mw": 0.42, "avg_mw": 0.28, "lat": 40.750429, "lon": -73.9768, "status": "ready", "cooling_towers": 2, "steam_pct": 51.2}, {"name": "300 West 55th St.", "address": "911 8Th Avenue", "type": "Multifamily Housing", "sqft": 342276, "peak_mw": 0.41, "avg_mw": 0.29, "lat": 40.76489, "lon": -73.984224, "status": "responding", "cooling_towers": 1, "steam_pct": 72.1}, {"name": "DE HOSTOS APARTMENTS", "address": "201 WEST 93RD STREET", "type": "Multifamily Housing", "sqft": 246724, "peak_mw": 0.41, "avg_mw": 0.24, "lat": 40.792156, "lon": -73.971813, "status": "ready", "cooling_towers": 0, "steam_pct": 71.6}, {"name": "10 East 53rd Street", "address": "10 East 53rd Street", "type": "Office", "sqft": 374197, "peak_mw": 0.4, "avg_mw": 0.15, "lat": 40.760121, "lon": -73.975144, "status": "offline", "cooling_towers": 1, "steam_pct": 56.8}, {"name": "100 Wall Street", "address": "100 Wall Street", "type": "Office", "sqft": 487760, "peak_mw": 0.4, "avg_mw": 0.21, "lat": 40.70497, "lon": -74.007084, "status": "ready", "cooling_towers": 2, "steam_pct": 64.6}, {"name": "200 (655 3rd Ave)", "address": "200  East  42nd  St.", "type": "Office", "sqft": 383165, "peak_mw": 0.39, "avg_mw": 0.28, "lat": 40.750698, "lon": -73.974306, "status": "ready", "cooling_towers": 1, "steam_pct": 66.3}, {"name": "1270 Broadway", "address": "1270 Broadway", "type": "Office", "sqft": 130307, "peak_mw": 0.39, "avg_mw": 0.27, "lat": 40.748655, "lon": -73.988097, "status": "ready", "cooling_towers": 1, "steam_pct": 56.5}, {"name": "145 East 27th St Co LLC", "address": "145 EAST 27TH STREET", "type": "Multifamily Housing", "sqft": 175110, "peak_mw": 0.39, "avg_mw": 0.26, "lat": 40.741908, "lon": -73.98261, "status": "responding", "cooling_towers": 0, "steam_pct": 74.9}, {"name": "25 Montgomery St", "address": "25 Montgomery Street", "type": "Multifamily Housing", "sqft": 136070, "peak_mw": 0.38, "avg_mw": 0.23, "lat": 40.713434, "lon": -73.985077, "status": "ready", "cooling_towers": 0, "steam_pct": 91.4}, {"name": "Winter Garden", "address": "1632 Broadway", "type": "Performing Arts", "sqft": 63813, "peak_mw": 0.38, "avg_mw": 0.27, "lat": 40.761516, "lon": -73.983976, "status": "ready", "cooling_towers": 1, "steam_pct": 35.0}, {"name": "575 Madison Ave.", "address": "575 Madison Avenue", "type": "Office", "sqft": 421837, "peak_mw": 0.38, "avg_mw": 0.25, "lat": 40.7618, "lon": -73.972706, "status": "responding", "cooling_towers": 1, "steam_pct": 46.7}, {"name": "Feil - 444 East 82nd Street", "address": "426 East 82 Street", "type": "Multifamily Housing", "sqft": 502595, "peak_mw": 0.38, "avg_mw": 0.28, "lat": 40.773627, "lon": -73.949707, "status": "ready", "cooling_towers": 1, "steam_pct": 71.2}, {"name": "2 Dag Hammarskjold Condo", "address": "866 2nd Avenue", "type": "Office", "sqft": 90605, "peak_mw": 0.37, "avg_mw": 0.28, "lat": 40.752555, "lon": -73.970202, "status": "ready", "cooling_towers": 1, "steam_pct": 58.6}, {"name": "301 East Tenants Corp (301 East 75th Street)", "address": "301 East 75th Street", "type": "Multifamily Housing", "sqft": 128250, "peak_mw": 0.37, "avg_mw": 0.2, "lat": 40.770641, "lon": -73.956651, "status": "responding", "cooling_towers": 1, "steam_pct": 62.3}, {"name": "WEST SIDE URBAN RENEWAL (SITE B)", "address": "74 WEST 92ND STREET", "type": "Multifamily Housing", "sqft": 156140, "peak_mw": 0.37, "avg_mw": 0.23, "lat": 40.790056, "lon": -73.968834, "status": "ready", "cooling_towers": 0, "steam_pct": 73.8}, {"name": "100 William", "address": "100 William Street", "type": "Office", "sqft": 377120, "peak_mw": 0.37, "avg_mw": 0.16, "lat": 40.708497, "lon": -74.007477, "status": "ready", "cooling_towers": 1, "steam_pct": 59.0}, {"name": "Milstein Emigrant Savings", "address": "6 East 43rd Street", "type": "Office", "sqft": 340721, "peak_mw": 0.36, "avg_mw": 0.26, "lat": 40.753979, "lon": -73.979997, "status": "ready", "cooling_towers": 1, "steam_pct": 55.5}, {"name": "344 E 28th Street", "address": "463 1 Avenue", "type": "Multifamily Housing", "sqft": 218666, "peak_mw": 0.36, "avg_mw": 0.23, "lat": 40.739505, "lon": -73.976642, "status": "offline", "cooling_towers": 0, "steam_pct": 74.0}, {"name": "AKAM - 155 East 38th Street", "address": "155 East 38th Street", "type": "Multifamily Housing", "sqft": 164456, "peak_mw": 0.36, "avg_mw": 0.24, "lat": 40.748434, "lon": -73.976714, "status": "ready", "cooling_towers": 1, "steam_pct": 62.4}, {"name": "150 West 96th Street", "address": "150 West 96th Street", "type": "Multifamily Housing", "sqft": 216315, "peak_mw": 0.36, "avg_mw": 0.19, "lat": 40.793457, "lon": -73.968973, "status": "responding", "cooling_towers": 0, "steam_pct": 79.3}, {"name": "Leman: 41 Broad Street", "address": "41 Broad Street", "type": "K-12 School", "sqft": 97962, "peak_mw": 0.36, "avg_mw": 0.27, "lat": 40.705576, "lon": -74.011448, "status": "ready", "cooling_towers": 1, "steam_pct": 57.7}, {"name": "502 Park Avenue", "address": "502 Park Avenue", "type": "Multifamily Housing", "sqft": 252049, "peak_mw": 0.35, "avg_mw": 0.24, "lat": 40.763012, "lon": -73.969739, "status": "ready", "cooling_towers": 2, "steam_pct": 61.4}, {"name": "KERN57 - 303 East 57th Street", "address": "303 East 57th Street", "type": "Mixed Use Property", "sqft": 539027, "peak_mw": 0.34, "avg_mw": 0.28, "lat": 40.75922, "lon": -73.965059, "status": "responding", "cooling_towers": 2, "steam_pct": 90.3}, {"name": "DSNY_3879_Administrative Offices", "address": "44 Beaver St", "type": "Office", "sqft": 97596, "peak_mw": 0.34, "avg_mw": 0.26, "lat": 40.705066, "lon": -74.010939, "status": "ready", "cooling_towers": 0, "steam_pct": 51.3}, {"name": "410 Madison Avenue", "address": "410 Madison Ave", "type": "Office", "sqft": 62644, "peak_mw": 0.34, "avg_mw": 0.25, "lat": 40.756706, "lon": -73.976444, "status": "ready", "cooling_towers": 1, "steam_pct": 53.6}, {"name": "RY - 414 East 59th Street", "address": "414 East 59th Street", "type": "Multifamily Housing", "sqft": 128200, "peak_mw": 0.34, "avg_mw": 0.23, "lat": 40.759373, "lon": -73.961409, "status": "responding", "cooling_towers": 0, "steam_pct": 78.0}, {"name": "Maxwell: 200 East 61st St", "address": "200 East 61st Street", "type": "Multifamily Housing", "sqft": 345452, "peak_mw": 0.34, "avg_mw": 0.25, "lat": 40.762657, "lon": -73.965338, "status": "ready", "cooling_towers": 2, "steam_pct": 74.3}, {"name": "AKAM - 530 East 76th Street", "address": "530 East 76th Street", "type": "Multifamily Housing", "sqft": 344693, "peak_mw": 0.34, "avg_mw": 0.27, "lat": 40.769077, "lon": -73.95101, "status": "ready", "cooling_towers": 1, "steam_pct": 73.5}, {"name": "621 Columbus Avenue", "address": "621 Columbus Avenue", "type": "Multifamily Housing", "sqft": 252351, "peak_mw": 0.33, "avg_mw": 0.19, "lat": 40.789189, "lon": -73.970189, "status": "offline", "cooling_towers": 1, "steam_pct": 67.7}, {"name": "RY - 333 East 34th Street", "address": "331 East 34th Street", "type": "Multifamily Housing", "sqft": 204230, "peak_mw": 0.33, "avg_mw": 0.2, "lat": 40.744319, "lon": -73.974756, "status": "offline", "cooling_towers": 0, "steam_pct": 75.0}, {"name": "733", "address": "733  Third  Avenue", "type": "Office", "sqft": 389286, "peak_mw": 0.33, "avg_mw": 0.23, "lat": 40.753074, "lon": -73.972753, "status": "ready", "cooling_towers": 2, "steam_pct": 44.7}, {"name": "145 East 16th Street AKA 180 Third Avenue", "address": "145 East 16th Street AKA 180 Third Avenue", "type": "Multifamily Housing", "sqft": 236064, "peak_mw": 0.33, "avg_mw": 0.24, "lat": 40.735063, "lon": -73.987248, "status": "ready", "cooling_towers": 1, "steam_pct": 62.8}, {"name": "M267 (OECID: 0101607; BBL: 1014180007)", "address": "213 East 63rd Street", "type": "K-12 School", "sqft": 50060, "peak_mw": 0.32, "avg_mw": 0.29, "lat": 40.763842, "lon": -73.964222, "status": "ready", "cooling_towers": 2, "steam_pct": 68.4}, {"name": "399 East 72nd Apartment Owners Inc. (399 E 72 St)", "address": "399 E 72 St", "type": "Multifamily Housing", "sqft": 159403, "peak_mw": 0.31, "avg_mw": 0.2, "lat": 40.767778, "lon": -73.955917, "status": "offline", "cooling_towers": 0, "steam_pct": 72.1}, {"name": "1646 1 Avenue", "address": "1646 1 Avenue", "type": "Multifamily Housing", "sqft": 213220, "peak_mw": 0.31, "avg_mw": 0.16, "lat": 40.776614, "lon": -73.949556, "status": "responding", "cooling_towers": 0, "steam_pct": 70.7}, {"name": "Asia Society Building and Museum", "address": "725 Park Avenue", "type": "Museum", "sqft": 54139, "peak_mw": 0.31, "avg_mw": 0.25, "lat": 40.770032, "lon": -73.964594, "status": "responding", "cooling_towers": 1, "steam_pct": 65.9}, {"name": "1180 Avenue of the Americas", "address": "1180 Avenue of the Americas", "type": "Office", "sqft": 396211, "peak_mw": 0.31, "avg_mw": 0.24, "lat": 40.757479, "lon": -73.982176, "status": "ready", "cooling_towers": 1, "steam_pct": 51.2}, {"name": "250 Park Ave", "address": "250 Park Avenue", "type": "Office", "sqft": 519783, "peak_mw": 0.3, "avg_mw": 0.2, "lat": 40.755018, "lon": -73.975568, "status": "ready", "cooling_towers": 5, "steam_pct": 52.7}, {"name": "1 Beekman Pl", "address": "1 BEEKMAN PL.", "type": "Multifamily Housing", "sqft": 217175, "peak_mw": 0.3, "avg_mw": 0.16, "lat": 40.752872, "lon": -73.96513, "status": "responding", "cooling_towers": 0, "steam_pct": 71.3}, {"name": "The Carlyle Hotel NYC - 35 East 76th", "address": "35 East 76th Street", "type": "Hotel", "sqft": 316779, "peak_mw": 0.3, "avg_mw": 0.13, "lat": 40.774267, "lon": -73.963285, "status": "responding", "cooling_towers": 2, "steam_pct": 69.7}, {"name": "Triborough Pres LLC (2126) - 205 Avenue C", "address": "205 Avenue C", "type": "Multifamily Housing", "sqft": 149253, "peak_mw": 0.3, "avg_mw": 0.16, "lat": 40.727362, "lon": -73.976458, "status": "responding", "cooling_towers": 0, "steam_pct": 81.5}, {"name": "55 W. 39th St.", "address": "55 West 39th Street", "type": "Office", "sqft": 124438, "peak_mw": 0.29, "avg_mw": 0.22, "lat": 40.752313, "lon": -73.983993, "status": "offline", "cooling_towers": 1, "steam_pct": 51.1}, {"name": "STRAUS", "address": "224 EAST 28TH STREET", "type": "Multifamily Housing", "sqft": 230513, "peak_mw": 0.29, "avg_mw": 0.18, "lat": 40.741567, "lon": -73.979921, "status": "responding", "cooling_towers": 0, "steam_pct": 83.3}, {"name": "The Diamond & Jewelry Ind Comm Condo", "address": "62 West 47th Street", "type": "Office", "sqft": 170602, "peak_mw": 0.29, "avg_mw": 0.22, "lat": 40.757451, "lon": -73.980469, "status": "ready", "cooling_towers": 4, "steam_pct": 51.2}, {"name": "14 East 60th Street", "address": "14 East 60th Street", "type": "Office", "sqft": 129837, "peak_mw": 0.28, "avg_mw": 0.16, "lat": 40.76438, "lon": -73.971362, "status": "responding", "cooling_towers": 0, "steam_pct": 27.1}, {"name": "university club of New York", "address": "1 West 54th Street", "type": "Hotel", "sqft": 200000, "peak_mw": 0.28, "avg_mw": 0.13, "lat": 40.761252, "lon": -73.975854, "status": "ready", "cooling_towers": 1, "steam_pct": 47.2}, {"name": "385 Fifth Avenue LLC", "address": "385 5Th Avenue", "type": "Office", "sqft": 94471, "peak_mw": 0.28, "avg_mw": 0.21, "lat": 40.749563, "lon": -73.983726, "status": "responding", "cooling_towers": 1, "steam_pct": 49.0}, {"name": "Jay on 38th Street, LLC:8 WEST 38 STREET", "address": "8 WEST 38 STREET", "type": "Office", "sqft": 112120, "peak_mw": 0.27, "avg_mw": 0.19, "lat": 40.751215, "lon": -73.983354, "status": "offline", "cooling_towers": 1, "steam_pct": 61.1}, {"name": "505 5th Avenue", "address": "505 5th Avenue", "type": "Office", "sqft": 272443, "peak_mw": 0.27, "avg_mw": 0.13, "lat": 40.753663, "lon": -73.980744, "status": "ready", "cooling_towers": 1, "steam_pct": 32.3}, {"name": "Copy of DEPM 1828 - 200 East 62nd Street", "address": "200 East 62 Street", "type": "Multifamily Housing", "sqft": 249191, "peak_mw": 0.27, "avg_mw": 0.2, "lat": 40.763283, "lon": -73.964879, "status": "ready", "cooling_towers": 1, "steam_pct": 68.5}, {"name": "210 East 15th Street", "address": "210 East 15th Street", "type": "Multifamily Housing", "sqft": 136191, "peak_mw": 0.27, "avg_mw": 0.16, "lat": 40.733647, "lon": -73.985917, "status": "ready", "cooling_towers": 0, "steam_pct": 73.5}, {"name": "Allan Rosenfield LL97 Building", "address": "722 W 168 Street, 1050 Riverside Drive, 1072 Riverside Drive", "type": "College/University", "sqft": 256438, "peak_mw": 0.27, "avg_mw": 0.26, "lat": 40.842215, "lon": -73.942434, "status": "ready", "cooling_towers": 0, "steam_pct": 78.0}, {"name": "110 EAST 42ND STREET", "address": "110 East 42 Street", "type": "Office", "sqft": 319981, "peak_mw": 0.27, "avg_mw": 0.2, "lat": 40.751807, "lon": -73.976944, "status": "ready", "cooling_towers": 1, "steam_pct": 62.9}, {"name": "Abro - 280 Broadway", "address": "280 Broadway", "type": "Office", "sqft": 148868, "peak_mw": 0.27, "avg_mw": 0.1, "lat": 40.714417, "lon": -74.006089, "status": "responding", "cooling_towers": 1, "steam_pct": 21.4}, {"name": "DalanRE - 230 East 44th Street", "address": "230 East 44th Street", "type": "Multifamily Housing", "sqft": 116000, "peak_mw": 0.27, "avg_mw": 0.18, "lat": 40.751713, "lon": -73.972692, "status": "responding", "cooling_towers": 0, "steam_pct": 63.5}, {"name": "(8875) - 875 Tenant Corp (875 Fifth Avenue)", "address": "875 Fifth Avenue", "type": "Multifamily Housing", "sqft": 229577, "peak_mw": 0.27, "avg_mw": 0.14, "lat": 40.770247, "lon": -73.96863, "status": "ready", "cooling_towers": 0, "steam_pct": 45.9}, {"name": "The Kitano New York Hotel", "address": "66 Park Avenue", "type": "Hotel", "sqft": 105231, "peak_mw": 0.26, "avg_mw": 0.22, "lat": 40.749513, "lon": -73.979583, "status": "responding", "cooling_towers": 1, "steam_pct": 60.9}, {"name": "Chatham Towers", "address": "170 Park Row", "type": "Multifamily Housing", "sqft": 267051, "peak_mw": 0.26, "avg_mw": 0.21, "lat": 40.713215, "lon": -73.999931, "status": "ready", "cooling_towers": 1, "steam_pct": 77.8}, {"name": "Colony Club", "address": "560 Park Ave", "type": "Hotel", "sqft": 88493, "peak_mw": 0.26, "avg_mw": 0.17, "lat": 40.764941, "lon": -73.968333, "status": "ready", "cooling_towers": 0, "steam_pct": 49.3}, {"name": "770 Park Ave", "address": "770 PARK AVE.", "type": "Multifamily Housing", "sqft": 210783, "peak_mw": 0.26, "avg_mw": 0.16, "lat": 40.771621, "lon": -73.96346, "status": "responding", "cooling_towers": 0, "steam_pct": 69.4}, {"name": "29 Broadway", "address": "29 Broadway", "type": "Office", "sqft": 300954, "peak_mw": 0.26, "avg_mw": 0.18, "lat": 40.70601, "lon": -74.01315, "status": "responding", "cooling_towers": 2, "steam_pct": 57.8}, {"name": "WEST SIDE URBAN RENEWAL (SITE C)", "address": "589 AMSTERDAM AVENUE", "type": "Multifamily Housing", "sqft": 146436, "peak_mw": 0.26, "avg_mw": 0.16, "lat": 40.789261, "lon": -73.973851, "status": "ready", "cooling_towers": 0, "steam_pct": 69.4}, {"name": "CW - 52 Broadway", "address": "52 Broadway", "type": "Office", "sqft": 345540, "peak_mw": 0.26, "avg_mw": 0.15, "lat": 40.706493, "lon": -74.012725, "status": "ready", "cooling_towers": 2, "steam_pct": 34.0}, {"name": "501 Madison Ave", "address": "501 Madison Ave", "type": "Office", "sqft": 170200, "peak_mw": 0.26, "avg_mw": 0.17, "lat": 40.759204, "lon": -73.974599, "status": "ready", "cooling_towers": 1, "steam_pct": 42.4}, {"name": "Helmsley Spear - 83 Maiden Lane", "address": "83 Maiden Lane", "type": "Office", "sqft": 155714, "peak_mw": 0.26, "avg_mw": 0.16, "lat": 40.707443, "lon": -74.007607, "status": "ready", "cooling_towers": 1, "steam_pct": 37.2}, {"name": "4 W 58th Street", "address": "4 W 58th Street", "type": "Office", "sqft": 67416, "peak_mw": 0.25, "avg_mw": 0.17, "lat": 40.763785, "lon": -73.973788, "status": "responding", "cooling_towers": 1, "steam_pct": 93.0}, {"name": "AKAM - 310 East 70th Street", "address": "310 East 70th Street", "type": "Multifamily Housing", "sqft": 119000, "peak_mw": 0.25, "avg_mw": 0.15, "lat": 40.767233, "lon": -73.958722, "status": "responding", "cooling_towers": 0, "steam_pct": 74.3}, {"name": "Madison Avenue: 240 Madison Ave", "address": "240 Madison Ave", "type": "Office", "sqft": 79826, "peak_mw": 0.24, "avg_mw": 0.17, "lat": 40.75001, "lon": -73.981333, "status": "ready", "cooling_towers": 0, "steam_pct": 30.2}, {"name": "720 Park Ave", "address": "720 PARK AVE.", "type": "Multifamily Housing", "sqft": 206989, "peak_mw": 0.24, "avg_mw": 0.1, "lat": 40.76995, "lon": -73.964681, "status": "responding", "cooling_towers": 0, "steam_pct": 70.3}, {"name": "30 Vesey Street", "address": "30 Vesey Street", "type": "Office", "sqft": 71959, "peak_mw": 0.23, "avg_mw": 0.15, "lat": 40.711977, "lon": -74.009865, "status": "ready", "cooling_towers": 0, "steam_pct": 55.4}, {"name": "Dom Ben Realty Corp", "address": "280 Madison Avenue", "type": "Office", "sqft": 76811, "peak_mw": 0.23, "avg_mw": 0.18, "lat": 40.751432, "lon": -73.980301, "status": "ready", "cooling_towers": 1, "steam_pct": 30.5}, {"name": "(7651) - 150 East Tenants Corp. (150 East 61st Street)", "address": "150 East 61st Street", "type": "Multifamily Housing", "sqft": 184500, "peak_mw": 0.23, "avg_mw": 0.17, "lat": 40.763319, "lon": -73.966912, "status": "ready", "cooling_towers": 1, "steam_pct": 66.5}, {"name": "Century - 315 East 70th Street", "address": "309 EAST 70 STREET", "type": "Multifamily Housing", "sqft": 145748, "peak_mw": 0.23, "avg_mw": 0.14, "lat": 40.76731, "lon": -73.958863, "status": "ready", "cooling_towers": 0, "steam_pct": 77.8}, {"name": "DEPM 7568 - 233 East 70th St", "address": "1329 2 Avenue", "type": "Multifamily Housing", "sqft": 96820, "peak_mw": 0.23, "avg_mw": 0.13, "lat": 40.767593, "lon": -73.959263, "status": "responding", "cooling_towers": 0, "steam_pct": 55.7}, {"name": "148 Madison Avenue", "address": "148 Madison Avenue", "type": "Office", "sqft": 79800, "peak_mw": 0.23, "avg_mw": 0.16, "lat": 40.746335, "lon": -73.984012, "status": "responding", "cooling_towers": 0, "steam_pct": 32.0}, {"name": "(05358) - 357 East 57th Street Condominium (357 E. 57th Street)", "address": "357 E. 57th Street", "type": "Multifamily Housing", "sqft": 117395, "peak_mw": 0.23, "avg_mw": 0.16, "lat": 40.758644, "lon": -73.963694, "status": "ready", "cooling_towers": 0, "steam_pct": 69.3}, {"name": "St. Vincent Ferrer Complex", "address": "869 Lexington Avenue", "type": "Worship Facility", "sqft": 84131, "peak_mw": 0.23, "avg_mw": 0.14, "lat": 40.766118, "lon": -73.965336, "status": "responding", "cooling_towers": 0, "steam_pct": 70.2}, {"name": "300 E 42nd Street", "address": "300 E 42nd Street", "type": "Office", "sqft": 191000, "peak_mw": 0.23, "avg_mw": 0.12, "lat": 40.749413, "lon": -73.972275, "status": "ready", "cooling_towers": 1, "steam_pct": 69.9}, {"name": "167 East 67th St", "address": "1150 3RD AVE.", "type": "Multifamily Housing", "sqft": 109200, "peak_mw": 0.22, "avg_mw": 0.15, "lat": 40.766658, "lon": -73.962871, "status": "ready", "cooling_towers": 0, "steam_pct": 74.3}, {"name": "77 West 55th Street - 1360 Avenue Of The Americas", "address": "1360 AVENUE OF THE AMER", "type": "Multifamily Housing", "sqft": 169655, "peak_mw": 0.22, "avg_mw": 0.17, "lat": 40.763116, "lon": -73.978063, "status": "ready", "cooling_towers": 1, "steam_pct": 66.3}, {"name": "845 Third LP", "address": "845 Third Avenue", "type": "Office", "sqft": 352888, "peak_mw": 0.22, "avg_mw": 0.15, "lat": 40.756688, "lon": -73.970128, "status": "ready", "cooling_towers": 1, "steam_pct": 57.3}, {"name": "DEPM 1624 - 812 Park Ave", "address": "812 Park Avenue", "type": "Multifamily Housing", "sqft": 158827, "peak_mw": 0.22, "avg_mw": 0.15, "lat": 40.772913, "lon": -73.962517, "status": "responding", "cooling_towers": 0, "steam_pct": 69.6}, {"name": "8 Herald Square - 71 west 35th Street", "address": "71 west 35th Street", "type": "Office", "sqft": 100738, "peak_mw": 0.22, "avg_mw": 0.06, "lat": 40.750074, "lon": -73.986368, "status": "responding", "cooling_towers": 1, "steam_pct": 38.2}, {"name": "DCAS_1014_City Planning Building", "address": "22 Reade St", "type": "Office", "sqft": 99000, "peak_mw": 0.22, "avg_mw": 0.13, "lat": 40.714231, "lon": -74.004895, "status": "responding", "cooling_towers": 1, "steam_pct": 45.7}, {"name": "DCAS_1012_Manhattan Surrogate's Court", "address": "31 Chambers St", "type": "Office", "sqft": 212500, "peak_mw": 0.22, "avg_mw": 0.15, "lat": 40.713402, "lon": -74.004635, "status": "responding", "cooling_towers": 0, "steam_pct": 65.0}, {"name": "Century - 980 Fifth Ave", "address": "980 5 AVENUE", "type": "Multifamily Housing", "sqft": 169643, "peak_mw": 0.22, "avg_mw": 0.13, "lat": 40.777028, "lon": -73.963211, "status": "ready", "cooling_towers": 1, "steam_pct": 64.1}, {"name": "133 E. 58th St (131 EAST 58 STREET)", "address": "131 EAST 58 STREET", "type": "Medical Office", "sqft": 131978, "peak_mw": 0.21, "avg_mw": 0.16, "lat": 40.761733, "lon": -73.968927, "status": "ready", "cooling_towers": 0, "steam_pct": 54.9}, {"name": "1 Whitehall Street", "address": "1 Whitehall Street", "type": "Office", "sqft": 321994, "peak_mw": 0.21, "avg_mw": 0.12, "lat": 40.703973, "lon": -74.013164, "status": "ready", "cooling_towers": 1, "steam_pct": 80.2}, {"name": "641 Avenue of the Americas", "address": "635-641 Avenue of the Americas", "type": "Office", "sqft": 173891, "peak_mw": 0.21, "avg_mw": 0.12, "lat": 40.740581, "lon": -73.994504, "status": "responding", "cooling_towers": 0, "steam_pct": 43.6}, {"name": "Halstead - 230 East 15th Street", "address": "222 EAST 15 STREET", "type": "Multifamily Housing", "sqft": 110441, "peak_mw": 0.21, "avg_mw": 0.13, "lat": 40.733496, "lon": -73.98556, "status": "responding", "cooling_towers": 0, "steam_pct": 74.2}, {"name": "592 Fifth Avenue", "address": "592 5 AVENUE", "type": "Office", "sqft": 83207, "peak_mw": 0.21, "avg_mw": 0.13, "lat": 40.757129, "lon": -73.978238, "status": "ready", "cooling_towers": 1, "steam_pct": 27.8}, {"name": "DEPM 1240 - 1040 Fifth Ave", "address": "1040 Fifth Avenue", "type": "Multifamily Housing", "sqft": 153037, "peak_mw": 0.2, "avg_mw": 0.12, "lat": 40.780955, "lon": -73.960826, "status": "responding", "cooling_towers": 0, "steam_pct": 67.8}, {"name": "655 Park Ave", "address": "655 PARK AVE.", "type": "Multifamily Housing", "sqft": 160690, "peak_mw": 0.2, "avg_mw": 0.12, "lat": 40.767902, "lon": -73.965848, "status": "ready", "cooling_towers": 0, "steam_pct": 70.0}, {"name": "815 2nd Avenue", "address": "815 2nd Avenue", "type": "Office", "sqft": 140512, "peak_mw": 0.2, "avg_mw": 0.13, "lat": 40.750856, "lon": -73.971466, "status": "responding", "cooling_towers": 1, "steam_pct": 45.1}, {"name": "185 Madison Avenue LLC", "address": "185 Madison Avenue", "type": "Office", "sqft": 88000, "peak_mw": 0.2, "avg_mw": 0.12, "lat": 40.747861, "lon": -73.982875, "status": "responding", "cooling_towers": 0, "steam_pct": 54.4}, {"name": "AJC National Headquarters", "address": "165 E 56th Street", "type": "Office", "sqft": 70514, "peak_mw": 0.2, "avg_mw": 0.14, "lat": 40.759957, "lon": -73.968906, "status": "offline", "cooling_towers": 1, "steam_pct": 29.5}, {"name": "Sardi Building", "address": "234 West 44th Street", "type": "Office", "sqft": 60992, "peak_mw": 0.2, "avg_mw": 0.12, "lat": 40.757921, "lon": -73.987421, "status": "responding", "cooling_towers": 1, "steam_pct": 41.7}, {"name": "Orsid - 77 Park Avenue", "address": "100 EAST 39 STREET", "type": "Multifamily Housing", "sqft": 173483, "peak_mw": 0.19, "avg_mw": 0.12, "lat": 40.750076, "lon": -73.978731, "status": "responding", "cooling_towers": 0, "steam_pct": 77.7}, {"name": "Walter Samuels - 30 E 40th (28 EAST 40 STREET)", "address": "28 EAST 40 STREET", "type": "Medical Office", "sqft": 71063, "peak_mw": 0.19, "avg_mw": 0.11, "lat": 40.751385, "lon": -73.979915, "status": "ready", "cooling_towers": 0, "steam_pct": 52.0}, {"name": "25 West 39th Street", "address": "25 West 39th Street", "type": "Office", "sqft": 208529, "peak_mw": 0.18, "avg_mw": 0.07, "lat": 40.752022, "lon": -73.983304, "status": "responding", "cooling_towers": 1, "steam_pct": 49.4}, {"name": "25 West 39th Street", "address": "25 West 39th Street", "type": "Office", "sqft": 175590, "peak_mw": 0.18, "avg_mw": 0.07, "lat": 40.752022, "lon": -73.983304, "status": "ready", "cooling_towers": 1, "steam_pct": 46.1}, {"name": "WCMC Lasdon House", "address": "420 East 70th St", "type": "Multifamily Housing", "sqft": 228389, "peak_mw": 0.18, "avg_mw": 0.08, "lat": 40.766131, "lon": -73.95612, "status": "offline", "cooling_towers": 1, "steam_pct": 55.0}, {"name": "960 Fifth Ave/3 East 77th St", "address": "962 5 AVENUE", "type": "Multifamily Housing", "sqft": 213319, "peak_mw": 0.18, "avg_mw": 0.08, "lat": 40.775878, "lon": -73.96453, "status": "responding", "cooling_towers": 0, "steam_pct": 67.2}, {"name": "CUNY > GCC_340_Guttman Community College", "address": "50 West 40th St", "type": "College/University", "sqft": 74189, "peak_mw": 0.18, "avg_mw": 0.11, "lat": 40.753129, "lon": -73.984054, "status": "responding", "cooling_towers": 1, "steam_pct": 34.3}, {"name": "345 East 52nd Street", "address": "345 E. 52ND ST.", "type": "Multifamily Housing", "sqft": 100154, "peak_mw": 0.18, "avg_mw": 0.11, "lat": 40.755653, "lon": -73.966454, "status": "responding", "cooling_towers": 0, "steam_pct": 74.5}, {"name": "689 Fifth Avenue", "address": "689 5 AVENUE", "type": "Office", "sqft": 103577, "peak_mw": 0.18, "avg_mw": 0.1, "lat": 40.761131, "lon": -73.975295, "status": "ready", "cooling_towers": 1, "steam_pct": 35.9}, {"name": "921 Madison Avenue (Parent Property)", "address": "921 Madison Avenue", "type": "Worship Facility", "sqft": 65800, "peak_mw": 0.18, "avg_mw": 0.14, "lat": 40.772722, "lon": -73.964737, "status": "responding", "cooling_towers": 0, "steam_pct": 63.7}, {"name": "274 Madison Avenue", "address": "274 Madison Avenue", "type": "Medical Office", "sqft": 92582, "peak_mw": 0.18, "avg_mw": 0.12, "lat": 40.751248, "lon": -73.980434, "status": "ready", "cooling_towers": 0, "steam_pct": 44.4}, {"name": "DEPM 2404 - 136 East 56th St", "address": "136 East 56th Street", "type": "Multifamily Housing", "sqft": 187972, "peak_mw": 0.17, "avg_mw": 0.13, "lat": 40.760342, "lon": -73.969859, "status": "responding", "cooling_towers": 1, "steam_pct": 63.4}, {"name": "(7178) - 55 Liberty Owners Corp. (55 Liberty Street)", "address": "55 Liberty Street", "type": "Multifamily Housing", "sqft": 167428, "peak_mw": 0.17, "avg_mw": 0.07, "lat": 40.708692, "lon": -74.009508, "status": "responding", "cooling_towers": 0, "steam_pct": 75.5}, {"name": "Feil - 445 East 80th Street", "address": "443 East 80 Street", "type": "Multifamily Housing", "sqft": 223798, "peak_mw": 0.17, "avg_mw": 0.14, "lat": 40.772503, "lon": -73.950939, "status": "ready", "cooling_towers": 1, "steam_pct": 73.9}, {"name": "177 East 75 Street", "address": "177 East 75 Street", "type": "Multifamily Housing", "sqft": 186802, "peak_mw": 0.17, "avg_mw": 0.14, "lat": 40.771974, "lon": -73.959817, "status": "responding", "cooling_towers": 1, "steam_pct": 71.3}, {"name": "590 Fifth Holding LLC - 590 5th Avenue", "address": "590 5th Avenue", "type": "Office", "sqft": 101459, "peak_mw": 0.17, "avg_mw": 0.12, "lat": 40.757066, "lon": -73.978285, "status": "ready", "cooling_towers": 1, "steam_pct": 31.3}, {"name": "M486 (OECID: 0100075; BBL: 1009980041)", "address": "120 West 46th Street", "type": "K-12 School", "sqft": 62180, "peak_mw": 0.16, "avg_mw": 0.12, "lat": 40.757729, "lon": -73.983078, "status": "ready", "cooling_towers": 0, "steam_pct": 49.6}, {"name": "JM - 65 West 55 Street", "address": "65 West 55 Street", "type": "Multifamily Housing", "sqft": 112000, "peak_mw": 0.16, "avg_mw": 0.12, "lat": 40.762501, "lon": -73.976868, "status": "responding", "cooling_towers": 1, "steam_pct": 80.3}, {"name": "405 East 56th Street", "address": "405 East 56th Street", "type": "Multifamily Housing", "sqft": 160264, "peak_mw": 0.16, "avg_mw": 0.12, "lat": 40.757186, "lon": -73.962316, "status": "ready", "cooling_towers": 1, "steam_pct": 76.3}, {"name": "Halstead - 475 Park Avenue 2025", "address": "475 PARK AVENUE", "type": "Multifamily Housing", "sqft": 131573, "peak_mw": 0.16, "avg_mw": 0.09, "lat": 40.762131, "lon": -73.97036, "status": "ready", "cooling_towers": 0, "steam_pct": 73.7}, {"name": "24 West 57th Street", "address": "24 WEST 57 STREET", "type": "Office", "sqft": 104379, "peak_mw": 0.16, "avg_mw": 0.05, "lat": 40.763381, "lon": -73.974976, "status": "ready", "cooling_towers": 1, "steam_pct": 33.9}, {"name": "8 East 83rd Street", "address": "8 E. 83RD ST.", "type": "Multifamily Housing", "sqft": 175531, "peak_mw": 0.16, "avg_mw": 0.12, "lat": 40.779388, "lon": -73.961394, "status": "ready", "cooling_towers": 1, "steam_pct": 78.2}, {"name": "(3030) - 30 East 65th Street Corp (30 East 65 St.)", "address": "30 East 65 St.", "type": "Multifamily Housing", "sqft": 160881, "peak_mw": 0.15, "avg_mw": 0.14, "lat": 40.767228, "lon": -73.968423, "status": "responding", "cooling_towers": 2, "steam_pct": 70.3}, {"name": "*Feil - 140 West 57th Street", "address": "136 West 57 Street", "type": "Office", "sqft": 90000, "peak_mw": 0.15, "avg_mw": 0.12, "lat": 40.7649, "lon": -73.978597, "status": "offline", "cooling_towers": 0, "steam_pct": 35.6}, {"name": "598 Leasing Corp.", "address": "598 Madison Avenue", "type": "Office", "sqft": 76656, "peak_mw": 0.15, "avg_mw": 0.07, "lat": 40.762552, "lon": -73.972183, "status": "ready", "cooling_towers": 0, "steam_pct": 33.2}, {"name": "M833 (OECID: 0101333; BBL: 1000520001)", "address": "100 Trinity Place", "type": "K-12 School", "sqft": 115125, "peak_mw": 0.15, "avg_mw": 0.09, "lat": 40.709196, "lon": -74.012022, "status": "responding", "cooling_towers": 1, "steam_pct": 76.2}, {"name": "DEPM 1880 - 235 East 57th St", "address": "235 East 57 Street", "type": "Multifamily Housing", "sqft": 105749, "peak_mw": 0.15, "avg_mw": 0.09, "lat": 40.759863, "lon": -73.966581, "status": "ready", "cooling_towers": 0, "steam_pct": 75.8}, {"name": "ROBBINS PLAZA", "address": "341 EAST 70TH STREET", "type": "Multifamily Housing", "sqft": 109200, "peak_mw": 0.15, "avg_mw": 0.07, "lat": 40.76673, "lon": -73.957495, "status": "offline", "cooling_towers": 0, "steam_pct": 74.2}, {"name": "131 West 35th: 131 West 35th Street", "address": "131 W 35th St", "type": "Office", "sqft": 94000, "peak_mw": 0.15, "avg_mw": 0.09, "lat": 40.750999, "lon": -73.988559, "status": "ready", "cooling_towers": 0, "steam_pct": 84.8}, {"name": "Edgewater Apartments Inc.", "address": "530 East 72nd Street", "type": "Multifamily Housing", "sqft": 214500, "peak_mw": 0.15, "avg_mw": 0.11, "lat": 40.766226, "lon": -73.95229, "status": "offline", "cooling_towers": 1, "steam_pct": 75.6}, {"name": "811 Fifth Ave. Corp.", "address": "810 Fifth Avenue", "type": "Multifamily Housing", "sqft": 64515, "peak_mw": 0.14, "avg_mw": 0.11, "lat": 40.766098, "lon": -73.971279, "status": "ready", "cooling_towers": 0, "steam_pct": 66.8}, {"name": "JSRE: 550 5th Ave.", "address": "550 5th Avenue", "type": "Office", "sqft": 59684, "peak_mw": 0.14, "avg_mw": 0.08, "lat": 40.755626, "lon": -73.979336, "status": "offline", "cooling_towers": 2, "steam_pct": 27.8}, {"name": "Carlyle: 150 E 39th", "address": "150 E 39th St", "type": "Multifamily Housing", "sqft": 97232, "peak_mw": 0.14, "avg_mw": 0.09, "lat": 40.749309, "lon": -73.976898, "status": "ready", "cooling_towers": 0, "steam_pct": 78.3}, {"name": "AKAM - 1200 Fifth Avenue", "address": "1200 Fifth Avenue", "type": "Multifamily Housing", "sqft": 112559, "peak_mw": 0.14, "avg_mw": 0.08, "lat": 40.791138, "lon": -73.953388, "status": "offline", "cooling_towers": 1, "steam_pct": 66.5}, {"name": "441 Lexington Avenue", "address": "437 LEXINGTON AVENUE", "type": "Office", "sqft": 104457, "peak_mw": 0.14, "avg_mw": 0.09, "lat": 40.752833, "lon": -73.975027, "status": "ready", "cooling_towers": 1, "steam_pct": 65.2}, {"name": "Century - 130 East 18th Street", "address": "126 EAST 18 STREET", "type": "Multifamily Housing", "sqft": 187551, "peak_mw": 0.14, "avg_mw": 0.11, "lat": 40.736358, "lon": -73.986728, "status": "ready", "cooling_towers": 1, "steam_pct": 78.0}, {"name": "DEPM 2128 - 820 Park Ave", "address": "820 Park Avenue", "type": "Multifamily Housing", "sqft": 57914, "peak_mw": 0.14, "avg_mw": 0.1, "lat": 40.773242, "lon": -73.962278, "status": "ready", "cooling_towers": 0, "steam_pct": 65.8}, {"name": "AKAM - 220 East 60th Street", "address": "220 East 60th Street", "type": "Multifamily Housing", "sqft": 117039, "peak_mw": 0.14, "avg_mw": 0.1, "lat": 40.761897, "lon": -73.965476, "status": "responding", "cooling_towers": 1, "steam_pct": 78.6}, {"name": "DOHMH_3442_Washington Heights Health Center", "address": "600 West 168th St", "type": "Urgent Care/Clinic/Other Outpatient", "sqft": 51050, "peak_mw": 0.14, "avg_mw": 0.09, "lat": 40.841264, "lon": -73.940223, "status": "ready", "cooling_towers": 0, "steam_pct": 86.2}, {"name": "Allied Partners - 254 W 54th Street", "address": "254 W 54th Street", "type": "Office", "sqft": 60000, "peak_mw": 0.13, "avg_mw": 0.08, "lat": 40.764338, "lon": -73.983217, "status": "responding", "cooling_towers": 0, "steam_pct": 37.3}, {"name": "1080 Fifth Ave", "address": "1080 5TH AVE.", "type": "Multifamily Housing", "sqft": 110000, "peak_mw": 0.13, "avg_mw": 0.08, "lat": 40.783553, "lon": -73.958936, "status": "ready", "cooling_towers": 1, "steam_pct": 74.2}, {"name": "176 W 94th St", "address": "176 West 94th Street", "type": "Multifamily Housing", "sqft": 96184, "peak_mw": 0.13, "avg_mw": 0.07, "lat": 40.792483, "lon": -73.970689, "status": "ready", "cooling_towers": 0, "steam_pct": 77.4}, {"name": "WEST SIDE URBAN RENEWAL (SITE A)", "address": "120 WEST 94TH STREET", "type": "Multifamily Housing", "sqft": 62587, "peak_mw": 0.13, "avg_mw": 0.08, "lat": 40.791944, "lon": -73.9694, "status": "ready", "cooling_towers": 0, "steam_pct": 76.9}, {"name": "Murray Hill East Suites", "address": "149 E. 39Th Street", "type": "Hotel", "sqft": 88661, "peak_mw": 0.13, "avg_mw": 0.1, "lat": 40.749318, "lon": -73.976873, "status": "ready", "cooling_towers": 1, "steam_pct": 75.8}, {"name": "AAG: 421 7th Avenue", "address": "421 7th Avenue", "type": "Office", "sqft": 71811, "peak_mw": 0.12, "avg_mw": 0.1, "lat": 40.750503, "lon": -73.990966, "status": "responding", "cooling_towers": 0, "steam_pct": 22.5}, {"name": "WCMC Olin Hall", "address": "445 East 69th ST", "type": "Residence Hall/Dormitory", "sqft": 105477, "peak_mw": 0.12, "avg_mw": 0.09, "lat": 40.76519, "lon": -73.955778, "status": "ready", "cooling_towers": 0, "steam_pct": 69.9}, {"name": "60 Henry Street", "address": "60 Henry Street", "type": "Multifamily Housing", "sqft": 74990, "peak_mw": 0.12, "avg_mw": 0.06, "lat": 40.712968, "lon": -73.995008, "status": "responding", "cooling_towers": 1, "steam_pct": 71.2}, {"name": "DEPM 2376 - 988 Fifth Avenue", "address": "988 5 Avenue", "type": "Multifamily Housing", "sqft": 50396, "peak_mw": 0.12, "avg_mw": 0.07, "lat": 40.777472, "lon": -73.963002, "status": "ready", "cooling_towers": 0, "steam_pct": 69.4}, {"name": "(3035) - The Elysabeth Condominium (35 East 38 Street)", "address": "35 East 38 Street", "type": "Multifamily Housing", "sqft": 93180, "peak_mw": 0.12, "avg_mw": 0.1, "lat": 40.749988, "lon": -73.980395, "status": "responding", "cooling_towers": 1, "steam_pct": 70.9}, {"name": "18 East 50th Street", "address": "18 E 50th Street", "type": "Office", "sqft": 62775, "peak_mw": 0.11, "avg_mw": 0.09, "lat": 40.758136, "lon": -73.97627, "status": "responding", "cooling_towers": 0, "steam_pct": 55.3}, {"name": "DEPM 2360 - 27 East 65th St", "address": "27 East 65 Street", "type": "Multifamily Housing", "sqft": 141448, "peak_mw": 0.1, "avg_mw": 0.07, "lat": 40.767255, "lon": -73.968441, "status": "responding", "cooling_towers": 2, "steam_pct": 60.9}, {"name": "Century - 225 East 36th Street", "address": "225 East 36th Street", "type": "Multifamily Housing", "sqft": 217438, "peak_mw": 0.1, "avg_mw": 0.08, "lat": 40.746532, "lon": -73.976036, "status": "ready", "cooling_towers": 1, "steam_pct": 74.8}, {"name": "DEPM 1736 - 169 East 69th St", "address": "169 East 69 Street", "type": "Multifamily Housing", "sqft": 150395, "peak_mw": 0.1, "avg_mw": 0.08, "lat": 40.768129, "lon": -73.962743, "status": "ready", "cooling_towers": 1, "steam_pct": 74.5}, {"name": "117 East 72nd St", "address": "117 E. 72ND ST.", "type": "Multifamily Housing", "sqft": 88182, "peak_mw": 0.1, "avg_mw": 0.06, "lat": 40.770783, "lon": -73.963038, "status": "responding", "cooling_towers": 0, "steam_pct": 74.2}, {"name": "H&amp;K: 206 East 31st Street", "address": "443 3 AVENUE", "type": "Multifamily Housing", "sqft": 64245, "peak_mw": 0.1, "avg_mw": 0.05, "lat": 40.743584, "lon": -73.979672, "status": "ready", "cooling_towers": 0, "steam_pct": 66.7}, {"name": "AKAM - 521 Park Avenue", "address": "521 Park Avenue", "type": "Multifamily Housing", "sqft": 53957, "peak_mw": 0.1, "avg_mw": 0.06, "lat": 40.76372, "lon": -73.969197, "status": "ready", "cooling_towers": 0, "steam_pct": 75.6}, {"name": "19 East 57th Street", "address": "19E 57th Street", "type": "Office", "sqft": 100994, "peak_mw": 0.09, "avg_mw": 0.06, "lat": 40.762621, "lon": -73.973128, "status": "responding", "cooling_towers": 1, "steam_pct": 35.2}, {"name": "123 West 43 Street", "address": "123 West 43 Street", "type": "Performing Arts", "sqft": 88375, "peak_mw": 0.09, "avg_mw": 0.06, "lat": 40.755843, "lon": -73.984382, "status": "responding", "cooling_towers": 0, "steam_pct": 58.6}, {"name": "Halsead - 838 Fifth Avenue", "address": "838 5 AVENUE", "type": "Multifamily Housing", "sqft": 70892, "peak_mw": 0.09, "avg_mw": 0.04, "lat": 40.767925, "lon": -73.970339, "status": "ready", "cooling_towers": 2, "steam_pct": 55.3}, {"name": "M006 (OECID: 0100030; BBL: 1014930021)", "address": "45 East 81st Street", "type": "K-12 School", "sqft": 91300, "peak_mw": 0.09, "avg_mw": 0.05, "lat": 40.777455, "lon": -73.960713, "status": "ready", "cooling_towers": 0, "steam_pct": 70.4}, {"name": "DEPM 1064 - 812 Fifth Ave", "address": "812 5 Avenue", "type": "Multifamily Housing", "sqft": 94998, "peak_mw": 0.09, "avg_mw": 0.08, "lat": 40.766378, "lon": -73.971459, "status": "ready", "cooling_towers": 1, "steam_pct": 76.6}, {"name": "Sachetti: 328 E 43rd St", "address": "328 E 43rd St", "type": "Multifamily Housing", "sqft": 52314, "peak_mw": 0.08, "avg_mw": 0.05, "lat": 40.750068, "lon": -73.97073, "status": "ready", "cooling_towers": 0, "steam_pct": 80.1}, {"name": "220 East 57th Street", "address": "220 East 57th Street", "type": "Multifamily Housing", "sqft": 124060, "peak_mw": 0.08, "avg_mw": 0.06, "lat": 40.759937, "lon": -73.966805, "status": "ready", "cooling_towers": 1, "steam_pct": 77.7}, {"name": "49 East 52nd Street (47 E 52 ST)", "address": "47 EAST 52 STREET", "type": "Office", "sqft": 66117, "peak_mw": 0.08, "avg_mw": 0.05, "lat": 40.758976, "lon": -73.974328, "status": "ready", "cooling_towers": 1, "steam_pct": 54.3}, {"name": "The Harmonie Club - 4 East 60th Street", "address": "4 East 60th Street", "type": "Hotel", "sqft": 57000, "peak_mw": 0.08, "avg_mw": 0.03, "lat": 40.76472, "lon": -73.97216, "status": "ready", "cooling_towers": 1, "steam_pct": 46.9}, {"name": "215 Madison Avenue", "address": "215 Madison Avenue", "type": "Multifamily Housing", "sqft": 60300, "peak_mw": 0.07, "avg_mw": 0.05, "lat": 40.748879, "lon": -73.981882, "status": "offline", "cooling_towers": 0, "steam_pct": 81.2}, {"name": "79 East 79th St", "address": "73 EAST 79 STREET", "type": "Multifamily Housing", "sqft": 65353, "peak_mw": 0.07, "avg_mw": 0.04, "lat": 40.77597, "lon": -73.961269, "status": "responding", "cooling_towers": 0, "steam_pct": 73.6}, {"name": "NH 122 East 76th Street", "address": "122 East 76th Street", "type": "Medical Office", "sqft": 67500, "peak_mw": 0.07, "avg_mw": 0.04, "lat": 40.773308, "lon": -73.961051, "status": "responding", "cooling_towers": 0, "steam_pct": 75.7}, {"name": "DEPM 2580 - 161 East 79th St", "address": "159 East 79 Street", "type": "Multifamily Housing", "sqft": 59093, "peak_mw": 0.07, "avg_mw": 0.05, "lat": 40.774742, "lon": -73.958356, "status": "responding", "cooling_towers": 0, "steam_pct": 73.7}, {"name": "21 East 79th St", "address": "21 E. 79TH ST.", "type": "Multifamily Housing", "sqft": 55000, "peak_mw": 0.07, "avg_mw": 0.04, "lat": 40.77661, "lon": -73.962782, "status": "ready", "cooling_towers": 0, "steam_pct": 72.9}, {"name": "M058 (OECID: 0100069; BBL: 1010430022)", "address": "317 West 52nd Street", "type": "K-12 School", "sqft": 64480, "peak_mw": 0.07, "avg_mw": 0.06, "lat": 40.763855, "lon": -73.985907, "status": "ready", "cooling_towers": 0, "steam_pct": 72.7}, {"name": "Brookdale Residence Hall", "address": "50 E 34th St", "type": "Residence Hall/Dormitory", "sqft": 87550, "peak_mw": 0.07, "avg_mw": 0.04, "lat": 40.747584, "lon": -73.98255, "status": "ready", "cooling_towers": 1, "steam_pct": 75.0}, {"name": "71 Park Avenue", "address": "71 PARK AVE.", "type": "Multifamily Housing", "sqft": 52593, "peak_mw": 0.07, "avg_mw": 0.04, "lat": 40.749815, "lon": -73.979338, "status": "ready", "cooling_towers": 0, "steam_pct": 79.0}, {"name": "3 West 57 Street", "address": "3 West 57 Street", "type": "Office", "sqft": 58001, "peak_mw": 0.06, "avg_mw": 0.04, "lat": 40.763197, "lon": -73.974496, "status": "ready", "cooling_towers": 1, "steam_pct": 62.9}, {"name": "St. Vartan - 630 Second Avenue", "address": "622 2 Avenue", "type": "Worship Facility", "sqft": 85357, "peak_mw": 0.06, "avg_mw": 0.04, "lat": 40.744876, "lon": -73.975799, "status": "ready", "cooling_towers": 1, "steam_pct": 72.8}, {"name": "36 East 72nd St (34 East 72nd)", "address": "36 E. 72ND ST.", "type": "Multifamily Housing", "sqft": 64000, "peak_mw": 0.05, "avg_mw": 0.02, "lat": 40.771618, "lon": -73.965066, "status": "responding", "cooling_towers": 0, "steam_pct": 73.7}, {"name": "The Door - 121 Ave of the Americas", "address": "121 Ave of the Americas", "type": "Office", "sqft": 84365, "peak_mw": 0.04, "avg_mw": 0.03, "lat": 40.723903, "lon": -74.00469, "status": "ready", "cooling_towers": 0, "steam_pct": 47.4}, {"name": "57 Worth Street", "address": "57 Worth Street", "type": "Office", "sqft": 60610, "peak_mw": 0.04, "avg_mw": 0.02, "lat": 40.717173, "lon": -74.006443, "status": "ready", "cooling_towers": 0, "steam_pct": 65.3}, {"name": "The General Society Building", "address": "20 West 44th Street", "type": "Office", "sqft": 67132, "peak_mw": 0.03, "avg_mw": 0.02, "lat": 40.755156, "lon": -73.980848, "status": "ready", "cooling_towers": 0, "steam_pct": 80.0}];
+
+// ── Map ────────────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  zoomControl: false,
+  attributionControl: false,
+}).setView([40.765, -73.975], 13);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  subdomains: 'abcd',
+}).addTo(map);
+
+const statusColors = {
+  responding: '#2e7d32',
+  ready: '#0277bd',
+  offline: '#c62828',
+};
+
+const markers = [];
+buildings.forEach((b, i) => {
+  const radius = Math.max(4, Math.min(14, Math.sqrt(b.peak_mw) * 6));
+  const marker = L.circleMarker([b.lat, b.lon], {
+    radius: radius,
+    color: statusColors[b.status],
+    fillColor: statusColors[b.status],
+    fillOpacity: 0.55,
+    weight: 1.5,
+  }).addTo(map);
+
+  const statusClass = b.status === 'responding' ? 'color:#2e7d32' :
+                      b.status === 'ready' ? 'color:#0277bd' : 'color:#c62828';
+
+  marker.bindPopup(`
+    <div>
+      <b>${b.name}</b><br>
+      ${b.address}<br>
+      <span style="color:#6b7a8d">${b.type} &middot; ${(b.sqft/1000).toFixed(0)}k sqft</span><br>
+      <br>
+      Peak: <b>${b.peak_mw} MW</b> &middot; Avg: ${b.avg_mw} MW<br>
+      <span class="popup-status" style="${statusClass}">${b.status}</span>
+    </div>
+  `);
+
+  marker._buildingIndex = i;
+  markers.push(marker);
+});
+
+// ── Roster ─────────────────────────────────────────────────────────────────
+function renderRoster(filter) {
+  const roster = document.getElementById('roster');
+  const filtered = filter === 'all' ? buildings : buildings.filter(b => b.status === filter);
+  roster.innerHTML = filtered.map((b, i) => `
+    <div class="building-row" data-index="${buildings.indexOf(b)}" onclick="focusBuilding(${buildings.indexOf(b)})">
+      <div>
+        <div class="bldg-name">${b.name}</div>
+        <div class="bldg-addr">${b.address}</div>
+      </div>
+      <div class="bldg-mw">${b.peak_mw}</div>
+      <div class="bldg-status">
+        <span class="status-badge status-${b.status}">${b.status}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterRoster(status) {
+  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  renderRoster(status);
+}
+
+function focusBuilding(index) {
+  const b = buildings[index];
+  map.flyTo([b.lat, b.lon], 16, { duration: 0.6 });
+  markers[index].openPopup();
+}
+
+renderRoster('all');
+</script>
+</body>
+</html>
