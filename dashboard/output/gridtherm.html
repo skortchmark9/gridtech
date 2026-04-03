@@ -322,25 +322,32 @@
   .building-row .bldg-status {
     text-align: right;
   }
-  .status-badge {
-    display: inline-block;
+  .status-select {
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236b7a8d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 5px center;
+    padding-right: 16px;
   }
-  .status-responding {
-    background: rgba(46,125,50,0.1);
+  .status-select.s-responding {
+    background-color: rgba(46,125,50,0.1);
     color: var(--green);
   }
-  .status-ready {
-    background: rgba(2,119,189,0.1);
+  .status-select.s-ready {
+    background-color: rgba(2,119,189,0.1);
     color: var(--accent);
   }
-  .status-offline {
-    background: rgba(198,40,40,0.1);
+  .status-select.s-offline {
+    background-color: rgba(198,40,40,0.1);
     color: var(--red);
   }
 
@@ -547,9 +554,9 @@
     <div class="map-overlay">
       <h3>Enrolled Buildings</h3>
       <div class="map-legend">
-        <div class="item"><div class="dot" style="background:var(--green)"></div>Responding &mdash; 129</div>
-        <div class="item"><div class="dot" style="background:var(--accent)"></div>Ready &mdash; 239</div>
-        <div class="item"><div class="dot" style="background:var(--red)"></div>Offline &mdash; 34</div>
+        <div class="item"><div class="dot" style="background:var(--green)"></div>Responding &mdash; <span id="legend-responding">129</span></div>
+        <div class="item"><div class="dot" style="background:var(--accent)"></div>Ready &mdash; <span id="legend-ready">239</span></div>
+        <div class="item"><div class="dot" style="background:var(--red)"></div>Offline &mdash; <span id="legend-offline">34</span></div>
       </div>
     </div>
   </div>
@@ -569,7 +576,7 @@
       </div>
       <div class="metric-card">
         <div class="label">Responding</div>
-        <div class="value" style="color:var(--green)">113.8<span class="unit"> MW</span></div>
+        <div class="value" style="color:var(--green)" id="metric-responding-mw">113.8<span class="unit"> MW</span></div>
       </div>
     </div>
 
@@ -579,16 +586,16 @@
       <div class="util-bar-container">
         <div class="util-bar-header">
           <span>Base load: 15.8%</span>
-          <span style="color:var(--accent)">+ DR: 5.6%</span>
-          <span style="color:var(--text-dim)">Total: 21.4%</span>
+          <span style="color:var(--accent)" id="util-dr-label">+ DR: 5.6%</span>
+          <span style="color:var(--text-dim)" id="util-total-label">Total: 21.4%</span>
         </div>
         <div class="util-bar">
           <div class="segment base" style="width:15.8%"></div>
-          <div class="segment dr" style="width:5.6%"></div>
+          <div class="segment dr" id="util-dr-bar" style="width:5.6%"></div>
         </div>
         <div class="util-labels">
           <span>0 Mlb/hr</span>
-          <span>1578 base + 554 DR</span>
+          <span id="util-sendout-label">1578 base + 554 DR</span>
           <span>9,994 Mlb/hr</span>
         </div>
       </div>
@@ -600,18 +607,18 @@
       <div class="grid-stats">
         <div class="grid-stat">
           <div class="stat-label">Zone J Peak Relief</div>
-          <div class="stat-value stat-green">1.8%</div>
+          <div class="stat-value stat-green" id="stat-zone-j">1.8%</div>
           <div class="stat-detail">of 10.88 GW peak demand</div>
         </div>
         <div class="grid-stat">
-          <div class="stat-label">CO&#8322; Reduction</div>
-          <div class="stat-value stat-green">-116.6%</div>
-          <div class="stat-detail">vs electric cooling (marginal)</div>
+          <div class="stat-label">CO&#8322; vs Peaker</div>
+          <div class="stat-value stat-green">75.0%</div>
+          <div class="stat-detail">1037 of 1383 lbs/MWh avoided</div>
         </div>
         <div class="grid-stat">
           <div class="stat-label">Spare Capacity Used</div>
-          <div class="stat-value stat-cyan">6.6%</div>
-          <div class="stat-detail">554 / 8416 Mlb/hr</div>
+          <div class="stat-value stat-cyan" id="stat-spare">6.6%</div>
+          <div class="stat-detail" id="stat-spare-detail">554 / 8416 Mlb/hr</div>
         </div>
         <div class="grid-stat">
           <div class="stat-label">Cogen Share</div>
@@ -746,40 +753,46 @@ buildings.forEach((b, i) => {
     weight: 1.5,
   }).addTo(drMap);
 
-  const statusClass = b.status === 'responding' ? 'color:#2e7d32' :
-                      b.status === 'ready' ? 'color:#0277bd' : 'color:#c62828';
-
-  marker.bindPopup(`
-    <div>
-      <b>${b.name}</b><br>
-      ${b.address}<br>
-      <span style="color:#6b7a8d">${b.type} &middot; ${(b.sqft/1000).toFixed(0)}k sqft</span><br>
-      <br>
-      Peak: <b>${b.peak_mw} MW</b> &middot; Avg: ${b.avg_mw} MW<br>
-      <span class="popup-status" style="${statusClass}">${b.status}</span>
-    </div>
-  `);
+  marker.bindPopup(popupHtml(i));
 
   marker._buildingIndex = i;
   markers.push(marker);
 });
 
+// ── Constants for recalculation ───────────────────────────────────────────
+const BASE_UTIL_PCT = 15.8;
+const TOTAL_CAPACITY = 9994;
+const SPARE_CAPACITY = 8416.0;
+const BASE_SENDOUT = 1578;
+const ZONE_J_PEAK_GW = 10.88;
+const STATUS_ORDER = ['responding', 'ready', 'offline'];
+
 // ── Roster ─────────────────────────────────────────────────────────────────
+let currentFilter = 'all';
+
 function renderRoster(filter) {
+  currentFilter = filter;
   const roster = document.getElementById('roster');
   const filtered = filter === 'all' ? buildings : buildings.filter(b => b.status === filter);
-  roster.innerHTML = filtered.map((b, i) => `
-    <div class="building-row" data-index="${buildings.indexOf(b)}" onclick="focusBuilding(${buildings.indexOf(b)})">
+  roster.innerHTML = filtered.map((b, i) => {
+    const idx = buildings.indexOf(b);
+    return `
+    <div class="building-row" data-index="${idx}" onclick="focusBuilding(${idx})">
       <div>
         <div class="bldg-name">${b.name}</div>
         <div class="bldg-addr">${b.address}</div>
       </div>
       <div class="bldg-mw">${b.peak_mw}</div>
       <div class="bldg-status">
-        <span class="status-badge status-${b.status}">${b.status}</span>
+        <select class="status-select s-${b.status}" onchange="event.stopPropagation(); setStatus(${idx}, this.value)" onclick="event.stopPropagation()">
+          <option value="responding" ${b.status==='responding'?'selected':''}>Responding</option>
+          <option value="ready" ${b.status==='ready'?'selected':''}>Ready</option>
+          <option value="offline" ${b.status==='offline'?'selected':''}>Offline</option>
+        </select>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function filterRoster(status) {
@@ -792,6 +805,79 @@ function focusBuilding(index) {
   const b = buildings[index];
   drMap.flyTo([b.lat, b.lon], 16, { duration: 0.6 });
   markers[index].openPopup();
+}
+
+function setStatus(index, newStatus) {
+  const b = buildings[index];
+  b.status = newStatus;
+
+  // Update marker
+  const color = statusColors[b.status];
+  markers[index].setStyle({ color, fillColor: color });
+
+  // Update popup
+  updatePopup(index);
+  recalculate();
+  renderRoster(currentFilter);
+}
+
+function popupHtml(index) {
+  const b = buildings[index];
+  return `
+    <div>
+      <b>${b.name}</b><br>
+      ${b.address}<br>
+      <span style="color:#6b7a8d">${b.type} &middot; ${(b.sqft/1000).toFixed(0)}k sqft</span><br>
+      <br>
+      Peak: <b>${b.peak_mw} MW</b> &middot; Avg: ${b.avg_mw} MW<br>
+      <select class="status-select s-${b.status}" onchange="setStatus(${index}, this.value)" style="margin-top:6px">
+        <option value="responding" ${b.status==='responding'?'selected':''}>Responding</option>
+        <option value="ready" ${b.status==='ready'?'selected':''}>Ready</option>
+        <option value="offline" ${b.status==='offline'?'selected':''}>Offline</option>
+      </select>
+    </div>
+  `;
+}
+
+function updatePopup(index) {
+  markers[index].setPopupContent(popupHtml(index));
+}
+
+function recalculate() {
+  const responding = buildings.filter(b => b.status === 'responding');
+  const ready = buildings.filter(b => b.status === 'ready');
+  const offline = buildings.filter(b => b.status === 'offline');
+
+  const respondingMw = responding.reduce((s, b) => s + b.peak_mw, 0);
+
+  // DR steam demand: MW * 1000 kW * 3.412 kBtu/kW / COP 0.7 / 1000
+  const drSteam = Math.round(respondingMw * 1000 * 3.412 / 0.7 / 1000);
+  const drPct = (drSteam / TOTAL_CAPACITY * 100);
+  const totalPct = BASE_UTIL_PCT + drPct;
+  const sparePct = (drSteam / SPARE_CAPACITY * 100);
+  const zoneJPct = (respondingMw / 1000 / ZONE_J_PEAK_GW * 100);
+
+  // Legend
+  document.getElementById('legend-responding').textContent = responding.length;
+  document.getElementById('legend-ready').textContent = ready.length;
+  document.getElementById('legend-offline').textContent = offline.length;
+
+  // Metrics
+  document.getElementById('metric-responding-mw').innerHTML =
+    respondingMw.toFixed(1) + '<span class="unit"> MW</span>';
+
+  // Utilization bar
+  document.getElementById('util-dr-label').textContent = '+ DR: ' + drPct.toFixed(1) + '%';
+  document.getElementById('util-total-label').textContent = 'Total: ' + totalPct.toFixed(1) + '%';
+  document.getElementById('util-dr-bar').style.width = drPct.toFixed(1) + '%';
+  document.getElementById('util-sendout-label').textContent =
+    BASE_SENDOUT + ' base + ' + drSteam + ' DR';
+
+  // Grid stats
+  document.getElementById('stat-zone-j').textContent = zoneJPct.toFixed(1) + '%';
+  document.getElementById('stat-spare').textContent = sparePct.toFixed(1) + '%';
+  document.getElementById('stat-spare-detail').textContent =
+    drSteam + ' / ' + Math.round(SPARE_CAPACITY) + ' Mlb/hr';
 }
 
 renderRoster('all');

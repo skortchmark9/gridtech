@@ -219,16 +219,25 @@ with open(os.path.join(ROOT, "steam_supply", "output", "emission_factors_2025.js
 blended_summer_marginal = emissions["system_blended"]["marginal"]["summer"]  # lbs CO2/Mlb
 blended_summer_energy = emissions["system_blended"]["energy"]["summer"]
 
-# Grid marginal emission rate (gas peakers) ~0.4 tons CO2/MWh = 800 lbs/MWh
-grid_marginal_lbs_per_mwh = 800
-# Steam cooling emission rate: steam CO2/Mlb * Mlb/ton-cooling / COP-adjusted kW
-# Simplified: compare lbs CO2 per MWh-equivalent of cooling
-# Electric chiller: 1 MWh electricity → 5.0 MWh cooling (COP 5) → 800/5 = 160 lbs CO2/MWh-cooling
-# Absorption: 1 MWh-cooling needs ~4.88 Mlb steam (at COP 0.7) → 4.88 * 71 = 346 lbs CO2/MWh-cooling (marginal)
-# But marginal steam is essentially zero-carbon (using spare capacity from cogen)
-electric_cooling_co2 = round(grid_marginal_lbs_per_mwh / 5.0, 1)  # lbs CO2/MWh-cooling
-steam_cooling_co2_marginal = round(blended_summer_marginal * 4.88, 1)  # marginal method
-co2_avoided_pct = round((1 - steam_cooling_co2_marginal / electric_cooling_co2) * 100, 1) if electric_cooling_co2 > 0 else 0
+# Peaker emission rate — NYC Zone J marginal generators
+# From zone_j_analysis: avg marginal rate ~0.4 tons/MWh, peakers at ~1,383 lbs/MWh
+# Use 1,383 lbs/MWh as the displaced unit (simple cycle gas turbines)
+PEAKER_LBS_CO2_PER_MWH = 1383
+
+# Steam system marginal CO2 for absorption cooling:
+# Each MW of electric cooling shifted to steam needs:
+#   1 MW / COP_electric(5.0) * COP_ratio = equivalent cooling
+#   But the grid sees 1 MW of load reduction directly.
+# Steam cost: 1 MW load reduced → was served by peaker at 1,383 lbs/MWh
+# To provide same cooling via absorption: need steam at marginal rate
+# Marginal steam from cogen = ~71 lbs CO2/Mlb (summer, marginal method)
+# Steam needed per MW-cooling: 1 MW * 3412 kBtu/hr / (COP 0.7) / 1000 BTU/lb = 4.87 Mlb/hr
+# So steam CO2 per MW-hr of DR: 4.87 * 71 = 346 lbs CO2
+# vs peaker avoided: 1,383 lbs CO2 per MWh
+# Net reduction: 1,383 - 346 = 1,037 lbs avoided per MWh of DR
+steam_lbs_per_mw_dr = round(4.87 * blended_summer_marginal, 0)  # lbs CO2 per MWh-equiv
+co2_avoided_per_mwh = round(PEAKER_LBS_CO2_PER_MWH - steam_lbs_per_mw_dr, 0)
+co2_avoided_pct = round(co2_avoided_per_mwh / PEAKER_LBS_CO2_PER_MWH * 100, 1)
 
 # ── Generate HTML ────────────────────────────────────────────────────────────
 html = f"""<!DOCTYPE html>
@@ -555,25 +564,32 @@ html = f"""<!DOCTYPE html>
   .building-row .bldg-status {{
     text-align: right;
   }}
-  .status-badge {{
-    display: inline-block;
+  .status-select {{
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236b7a8d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 5px center;
+    padding-right: 16px;
   }}
-  .status-responding {{
-    background: rgba(46,125,50,0.1);
+  .status-select.s-responding {{
+    background-color: rgba(46,125,50,0.1);
     color: var(--green);
   }}
-  .status-ready {{
-    background: rgba(2,119,189,0.1);
+  .status-select.s-ready {{
+    background-color: rgba(2,119,189,0.1);
     color: var(--accent);
   }}
-  .status-offline {{
-    background: rgba(198,40,40,0.1);
+  .status-select.s-offline {{
+    background-color: rgba(198,40,40,0.1);
     color: var(--red);
   }}
 
@@ -780,9 +796,9 @@ html = f"""<!DOCTYPE html>
     <div class="map-overlay">
       <h3>Enrolled Buildings</h3>
       <div class="map-legend">
-        <div class="item"><div class="dot" style="background:var(--green)"></div>Responding &mdash; {responding_count}</div>
-        <div class="item"><div class="dot" style="background:var(--accent)"></div>Ready &mdash; {ready_count}</div>
-        <div class="item"><div class="dot" style="background:var(--red)"></div>Offline &mdash; {offline_count}</div>
+        <div class="item"><div class="dot" style="background:var(--green)"></div>Responding &mdash; <span id="legend-responding">{responding_count}</span></div>
+        <div class="item"><div class="dot" style="background:var(--accent)"></div>Ready &mdash; <span id="legend-ready">{ready_count}</span></div>
+        <div class="item"><div class="dot" style="background:var(--red)"></div>Offline &mdash; <span id="legend-offline">{offline_count}</span></div>
       </div>
     </div>
   </div>
@@ -802,7 +818,7 @@ html = f"""<!DOCTYPE html>
       </div>
       <div class="metric-card">
         <div class="label">Responding</div>
-        <div class="value" style="color:var(--green)">{responding_mw}<span class="unit"> MW</span></div>
+        <div class="value" style="color:var(--green)" id="metric-responding-mw">{responding_mw}<span class="unit"> MW</span></div>
       </div>
     </div>
 
@@ -812,16 +828,16 @@ html = f"""<!DOCTYPE html>
       <div class="util-bar-container">
         <div class="util-bar-header">
           <span>Base load: {utilization_pct}%</span>
-          <span style="color:var(--accent)">+ DR: {round(dr_steam_demand_mlbhr / total_capacity * 100, 1)}%</span>
-          <span style="color:var(--text-dim)">Total: {current_utilization}%</span>
+          <span style="color:var(--accent)" id="util-dr-label">+ DR: {round(dr_steam_demand_mlbhr / total_capacity * 100, 1)}%</span>
+          <span style="color:var(--text-dim)" id="util-total-label">Total: {current_utilization}%</span>
         </div>
         <div class="util-bar">
           <div class="segment base" style="width:{utilization_pct}%"></div>
-          <div class="segment dr" style="width:{round(dr_steam_demand_mlbhr / total_capacity * 100, 1)}%"></div>
+          <div class="segment dr" id="util-dr-bar" style="width:{round(dr_steam_demand_mlbhr / total_capacity * 100, 1)}%"></div>
         </div>
         <div class="util-labels">
           <span>0 Mlb/hr</span>
-          <span>{int(steam["summer_avg_rate_mlbhr"])} base + {int(dr_steam_demand_mlbhr)} DR</span>
+          <span id="util-sendout-label">{int(steam["summer_avg_rate_mlbhr"])} base + {int(dr_steam_demand_mlbhr)} DR</span>
           <span>{total_capacity:,} Mlb/hr</span>
         </div>
       </div>
@@ -833,18 +849,18 @@ html = f"""<!DOCTYPE html>
       <div class="grid-stats">
         <div class="grid-stat">
           <div class="stat-label">Zone J Peak Relief</div>
-          <div class="stat-value stat-green">{round(float(realistic['pct_zone_j']),1)}%</div>
+          <div class="stat-value stat-green" id="stat-zone-j">{round(float(realistic['pct_zone_j']),1)}%</div>
           <div class="stat-detail">of 10.88 GW peak demand</div>
         </div>
         <div class="grid-stat">
-          <div class="stat-label">CO&#8322; Reduction</div>
+          <div class="stat-label">CO&#8322; vs Peaker</div>
           <div class="stat-value stat-green">{co2_avoided_pct}%</div>
-          <div class="stat-detail">vs electric cooling (marginal)</div>
+          <div class="stat-detail">{int(co2_avoided_per_mwh)} of {PEAKER_LBS_CO2_PER_MWH} lbs/MWh avoided</div>
         </div>
         <div class="grid-stat">
           <div class="stat-label">Spare Capacity Used</div>
-          <div class="stat-value stat-cyan">{round(dr_steam_demand_mlbhr / spare_capacity * 100, 1)}%</div>
-          <div class="stat-detail">{int(dr_steam_demand_mlbhr)} / {int(spare_capacity)} Mlb/hr</div>
+          <div class="stat-value stat-cyan" id="stat-spare">{round(dr_steam_demand_mlbhr / spare_capacity * 100, 1)}%</div>
+          <div class="stat-detail" id="stat-spare-detail">{int(dr_steam_demand_mlbhr)} / {int(spare_capacity)} Mlb/hr</div>
         </div>
         <div class="grid-stat">
           <div class="stat-label">Cogen Share</div>
@@ -979,40 +995,46 @@ buildings.forEach((b, i) => {{
     weight: 1.5,
   }}).addTo(drMap);
 
-  const statusClass = b.status === 'responding' ? 'color:#2e7d32' :
-                      b.status === 'ready' ? 'color:#0277bd' : 'color:#c62828';
-
-  marker.bindPopup(`
-    <div>
-      <b>${{b.name}}</b><br>
-      ${{b.address}}<br>
-      <span style="color:#6b7a8d">${{b.type}} &middot; ${{(b.sqft/1000).toFixed(0)}}k sqft</span><br>
-      <br>
-      Peak: <b>${{b.peak_mw}} MW</b> &middot; Avg: ${{b.avg_mw}} MW<br>
-      <span class="popup-status" style="${{statusClass}}">${{b.status}}</span>
-    </div>
-  `);
+  marker.bindPopup(popupHtml(i));
 
   marker._buildingIndex = i;
   markers.push(marker);
 }});
 
+// ── Constants for recalculation ───────────────────────────────────────────
+const BASE_UTIL_PCT = {utilization_pct};
+const TOTAL_CAPACITY = {total_capacity};
+const SPARE_CAPACITY = {spare_capacity};
+const BASE_SENDOUT = {int(steam["summer_avg_rate_mlbhr"])};
+const ZONE_J_PEAK_GW = 10.88;
+const STATUS_ORDER = ['responding', 'ready', 'offline'];
+
 // ── Roster ─────────────────────────────────────────────────────────────────
+let currentFilter = 'all';
+
 function renderRoster(filter) {{
+  currentFilter = filter;
   const roster = document.getElementById('roster');
   const filtered = filter === 'all' ? buildings : buildings.filter(b => b.status === filter);
-  roster.innerHTML = filtered.map((b, i) => `
-    <div class="building-row" data-index="${{buildings.indexOf(b)}}" onclick="focusBuilding(${{buildings.indexOf(b)}})">
+  roster.innerHTML = filtered.map((b, i) => {{
+    const idx = buildings.indexOf(b);
+    return `
+    <div class="building-row" data-index="${{idx}}" onclick="focusBuilding(${{idx}})">
       <div>
         <div class="bldg-name">${{b.name}}</div>
         <div class="bldg-addr">${{b.address}}</div>
       </div>
       <div class="bldg-mw">${{b.peak_mw}}</div>
       <div class="bldg-status">
-        <span class="status-badge status-${{b.status}}">${{b.status}}</span>
+        <select class="status-select s-${{b.status}}" onchange="event.stopPropagation(); setStatus(${{idx}}, this.value)" onclick="event.stopPropagation()">
+          <option value="responding" ${{b.status==='responding'?'selected':''}}>Responding</option>
+          <option value="ready" ${{b.status==='ready'?'selected':''}}>Ready</option>
+          <option value="offline" ${{b.status==='offline'?'selected':''}}>Offline</option>
+        </select>
       </div>
     </div>
-  `).join('');
+  `;
+  }}).join('');
 }}
 
 function filterRoster(status) {{
@@ -1025,6 +1047,79 @@ function focusBuilding(index) {{
   const b = buildings[index];
   drMap.flyTo([b.lat, b.lon], 16, {{ duration: 0.6 }});
   markers[index].openPopup();
+}}
+
+function setStatus(index, newStatus) {{
+  const b = buildings[index];
+  b.status = newStatus;
+
+  // Update marker
+  const color = statusColors[b.status];
+  markers[index].setStyle({{ color, fillColor: color }});
+
+  // Update popup
+  updatePopup(index);
+  recalculate();
+  renderRoster(currentFilter);
+}}
+
+function popupHtml(index) {{
+  const b = buildings[index];
+  return `
+    <div>
+      <b>${{b.name}}</b><br>
+      ${{b.address}}<br>
+      <span style="color:#6b7a8d">${{b.type}} &middot; ${{(b.sqft/1000).toFixed(0)}}k sqft</span><br>
+      <br>
+      Peak: <b>${{b.peak_mw}} MW</b> &middot; Avg: ${{b.avg_mw}} MW<br>
+      <select class="status-select s-${{b.status}}" onchange="setStatus(${{index}}, this.value)" style="margin-top:6px">
+        <option value="responding" ${{b.status==='responding'?'selected':''}}>Responding</option>
+        <option value="ready" ${{b.status==='ready'?'selected':''}}>Ready</option>
+        <option value="offline" ${{b.status==='offline'?'selected':''}}>Offline</option>
+      </select>
+    </div>
+  `;
+}}
+
+function updatePopup(index) {{
+  markers[index].setPopupContent(popupHtml(index));
+}}
+
+function recalculate() {{
+  const responding = buildings.filter(b => b.status === 'responding');
+  const ready = buildings.filter(b => b.status === 'ready');
+  const offline = buildings.filter(b => b.status === 'offline');
+
+  const respondingMw = responding.reduce((s, b) => s + b.peak_mw, 0);
+
+  // DR steam demand: MW * 1000 kW * 3.412 kBtu/kW / COP 0.7 / 1000
+  const drSteam = Math.round(respondingMw * 1000 * 3.412 / 0.7 / 1000);
+  const drPct = (drSteam / TOTAL_CAPACITY * 100);
+  const totalPct = BASE_UTIL_PCT + drPct;
+  const sparePct = (drSteam / SPARE_CAPACITY * 100);
+  const zoneJPct = (respondingMw / 1000 / ZONE_J_PEAK_GW * 100);
+
+  // Legend
+  document.getElementById('legend-responding').textContent = responding.length;
+  document.getElementById('legend-ready').textContent = ready.length;
+  document.getElementById('legend-offline').textContent = offline.length;
+
+  // Metrics
+  document.getElementById('metric-responding-mw').innerHTML =
+    respondingMw.toFixed(1) + '<span class="unit"> MW</span>';
+
+  // Utilization bar
+  document.getElementById('util-dr-label').textContent = '+ DR: ' + drPct.toFixed(1) + '%';
+  document.getElementById('util-total-label').textContent = 'Total: ' + totalPct.toFixed(1) + '%';
+  document.getElementById('util-dr-bar').style.width = drPct.toFixed(1) + '%';
+  document.getElementById('util-sendout-label').textContent =
+    BASE_SENDOUT + ' base + ' + drSteam + ' DR';
+
+  // Grid stats
+  document.getElementById('stat-zone-j').textContent = zoneJPct.toFixed(1) + '%';
+  document.getElementById('stat-spare').textContent = sparePct.toFixed(1) + '%';
+  document.getElementById('stat-spare-detail').textContent =
+    drSteam + ' / ' + Math.round(SPARE_CAPACITY) + ' Mlb/hr';
 }}
 
 renderRoster('all');
