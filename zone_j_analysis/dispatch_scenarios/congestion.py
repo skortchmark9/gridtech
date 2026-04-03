@@ -438,58 +438,63 @@ def print_executive_summary(combined, valid):
     print("EXECUTIVE SUMMARY: TRANSMISSION CONGESTION RELIEF")
     print("=" * 74)
 
-    cong_savings_str = ""
-    cong = combined.dropna(subset=["marginal_cost_congestion"])
-    if len(cong) > 0:
-        avg_cong = cong["marginal_cost_congestion"].mean()
-        binding = cong[cong["marginal_cost_congestion"] > 1]
-        cong_savings_str = f"""
-  CONGESTION IN SUMMER 2025
-  Zone J's avg congestion component was ${avg_cong:.2f}/MWh — meaning
-  transmission into NYC was NOT severely constrained this summer.
-  Only {len(binding)} hours ({len(binding)/len(cong)*100:.1f}%) had binding congestion (>$1/MWh).
-
-  This is actually consistent with Zone J having substantial local
-  generation (~{avg_fossil:,.0f} MW avg) that reduces reliance on imports.
-  The import reduction from DR ({avg_reduction:.0f} MW) would provide a
-  reliability buffer and incremental congestion relief, but the
-  primary value drivers in summer 2025 were emissions reduction
-  and wholesale price suppression, not congestion relief.
-
-  In a tighter summer (plant outages, higher demand, or transmission
-  derates), the congestion benefit would be substantially larger."""
-
     print(f"""
   THE DOUBLE BENEFIT OF STEAM DR
 
   Zone J imported an average of {avg_imports:,.0f} MW ({avg_imports/avg_load*100:.0f}% of load) across
   the summer. These imports flow through constrained transmission
-  corridors (Central East, UPNY-SENY, and submarine cables) that
-  frequently bind, driving up congestion costs for all NYC consumers.
+  corridors (Central East, UPNY-SENY, and submarine cables).
 
   500 MW of steam-chiller DR provides a double transmission benefit:
 
   1. DEMAND REDUCTION: {DR_MW} MW of electric chiller load switches off,
-     directly reducing the power that must flow into the city.
+     directly reducing power flowing through constrained corridors.
 
   2. LOCAL COGEN SUPPLY: The cogen plants (East River 10/20 + BNYCP)
      that produce the steam also generate {avg_cogen:,.0f} MW of electricity
-     locally — {avg_cogen/avg_fossil*100:.0f}% of all in-zone fossil generation. This
-     electricity is already displacing imports. The steam is captured
-     from exhaust heat at ~4 BTU/lb — nearly free.
+     locally — {avg_cogen/avg_fossil*100:.0f}% of all in-zone fossil generation. The
+     steam is captured from exhaust heat at ~4 BTU/lb — nearly free.
 
   NET IMPORT REDUCTION
   Total import reduction over the summer: {total_reduction_gwh:,.0f} GWh
   Avg hourly import reduction: {avg_reduction:,.0f} MW
   Import share of load drops from {avg_imports/avg_load*100:.1f}% to {combined['new_imports_mw'].mean()/(avg_load-DR_MW)*100:.1f}%
-{cong_savings_str}
-  WHY THIS MATTERS
-  NYC's transmission constraints are the primary driver of Zone J's
-  price premium over upstate. Every MW of local generation or demand
-  reduction that avoids using the constrained corridors reduces
-  congestion costs system-wide. Steam DR is uniquely positioned:
-  it simultaneously reduces demand AND leverages existing local cogen
-  capacity that produces both electricity and nearly-free steam.
+
+  CONGESTION: WHAT THE MMU REPORT REVEALS
+  (Source: Potomac Economics NYISO Q2 2025 Quarterly Report, Aug 2025)
+
+  Our DA LBMP zonal congestion analysis showed an average of only
+  -$1.70/MWh — but this UNDERSTATES actual congestion for three reasons:
+
+  1. RT CONGESTION WAS 2X DA: $130M RT vs $58M DA in Q2 2025. The
+     June 23-25 heat wave alone drove 44% of all RT congestion.
+     RT LBMPs hit $1,300-$1,800/MWh on June 24 (5-8pm).
+
+  2. INTERNAL NYC CONSTRAINTS are masked by zonal averaging. The
+     MMU identified binding N-1 constraints on:
+     - Greenwood-Vernon 138 kV (Gowanus-Greenwood lines OOS)
+     - Motthavn-Dunwoodie 345 kV (major import path)
+     - Astoria Annex-E.13th St 345 kV (forced out late April+)
+     These internal constraints had POSITIVE congestion at specific
+     buses, even when the zonal average was negative.
+
+  3. OOM COSTS aren't in LBMP at all. NYC had out-of-market actions
+     on 65 of 91 days in Q2 2025:
+     - Load pocket reserves (N-1-1): 50 days
+     - Transmission constraint management: 26 days
+     - Voltage management: 18 days
+     - ~$8M in BPCG uplift from Greenwood pocket OOM alone
+
+  Steam DR at {DR_MW} MW would directly reduce the need for these
+  OOM actions by reducing load in the constrained load pockets.
+  During the June heat wave — when load peaked at 31.9 GW (post-DR)
+  and fossil generators were 18.5% unavailable due to forced outages
+  — 500 MW of dispatchable DR behind the constraint would have been
+  worth far more than its emissions or price-suppression value.
+
+  The MMU also found that 25% of external ICAP was cut by neighboring
+  ISOs during the June 24 peak (non-firm transmission). Local
+  resources like steam DR are immune to this import curtailment risk.
 """)
 
 
