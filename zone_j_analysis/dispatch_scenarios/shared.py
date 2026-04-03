@@ -136,17 +136,37 @@ def load_all_data():
     units["co2_rate"] = units["CO2 Mass (short tons)"] / units["Gross Load (MW)"]
     units = units[units["co2_rate"].notna() & units["heat_rate"].notna()]
 
-    # ── LBMP ──
-    lbmp = _load_lbmp()
+    # ── LBMP (DA and RT) ──
+    da_lbmp = _load_lbmp("da")
+    rt_lbmp = _load_lbmp("rt")
+    load_hourly = zj_load.groupby("hour")["Load"].mean()
+
     lbmp_merged = None
-    if lbmp is not None:
-        lbmp_hourly = lbmp.groupby("hour").agg(
-            lbmp=("LBMP ($/MWHr)", "mean"),
-            marginal_cost_losses=("Marginal Cost Losses ($/MWHr)", "mean"),
-            marginal_cost_congestion=("Marginal Cost Congestion ($/MWHr)", "mean"),
+    if da_lbmp is not None:
+        da_hourly = da_lbmp.groupby("hour").agg(
+            da_lbmp=("LBMP ($/MWHr)", "mean"),
+            da_congestion=("Marginal Cost Congestion ($/MWHr)", "mean"),
+            da_losses=("Marginal Cost Losses ($/MWHr)", "mean"),
         )
-        load_hourly = zj_load.groupby("hour")["Load"].mean()
-        lbmp_merged = lbmp_hourly.join(load_hourly, how="inner")
+        lbmp_merged = da_hourly.join(load_hourly, how="inner")
+
+    if rt_lbmp is not None:
+        rt_hourly = rt_lbmp.groupby("hour").agg(
+            rt_lbmp=("LBMP ($/MWHr)", "mean"),
+            rt_congestion=("Marginal Cost Congestion ($/MWHr)", "mean"),
+            rt_losses=("Marginal Cost Losses ($/MWHr)", "mean"),
+        )
+        if lbmp_merged is not None:
+            lbmp_merged = lbmp_merged.join(rt_hourly, how="left")
+        else:
+            lbmp_merged = rt_hourly.join(load_hourly, how="inner")
+
+    # Backwards compat: 'lbmp' column = DA if available, else RT
+    if lbmp_merged is not None:
+        if "da_lbmp" in lbmp_merged.columns:
+            lbmp_merged["lbmp"] = lbmp_merged["da_lbmp"]
+            lbmp_merged["marginal_cost_congestion"] = lbmp_merged["da_congestion"]
+            lbmp_merged["marginal_cost_losses"] = lbmp_merged["da_losses"]
 
     print(f"  Merged hourly: {len(merged):,} hours")
     print("  Data loading complete.\n")
@@ -154,16 +174,25 @@ def load_all_data():
     return merged, units, lbmp_merged
 
 
-def _load_lbmp():
-    lbmp_dir = os.path.join(NYISO_DIR, "lbmp")
+def _load_lbmp(market="da"):
+    """Load LBMP data. market='da' for day-ahead, 'rt' for real-time."""
+    if market == "da":
+        lbmp_dir = os.path.join(NYISO_DIR, "lbmp")
+        url_path = "damlbmp"
+        file_pattern = "damlbmp_zone_csv.zip"
+    else:
+        lbmp_dir = os.path.join(NYISO_DIR, "rt_lbmp")
+        url_path = "realtime"
+        file_pattern = "realtime_zone_csv.zip"
+
     os.makedirs(lbmp_dir, exist_ok=True)
     frames = []
     try:
         for month in ["20250601", "20250701", "20250801"]:
-            filename = f"{month}damlbmp_zone_csv.zip"
+            filename = f"{month}{file_pattern}"
             dest = os.path.join(lbmp_dir, filename)
             if not os.path.exists(dest):
-                url = f"http://mis.nyiso.com/public/csv/damlbmp/{filename}"
+                url = f"http://mis.nyiso.com/public/csv/{url_path}/{filename}"
                 print(f"  Downloading {filename}...")
                 resp = requests.get(url, timeout=120)
                 resp.raise_for_status()
@@ -178,10 +207,10 @@ def _load_lbmp():
         df["Time Stamp"] = pd.to_datetime(df["Time Stamp"])
         zj = df[df["Name"] == "N.Y.C."].copy()
         zj["hour"] = zj["Time Stamp"].dt.floor("h")
-        print(f"  LBMP: {len(zj):,} records")
+        print(f"  {market.upper()} LBMP: {len(zj):,} records")
         return zj
     except Exception as e:
-        print(f"  LBMP fetch failed: {e}")
+        print(f"  {market.upper()} LBMP fetch failed: {e}")
         return None
 
 
@@ -253,17 +282,24 @@ def run_dr_scenario(merged_hourly, units, active_mask, dr_mw=DR_MW):
 
 
 def estimate_price_impact(lbmp_merged, active_mask, dr_mw=DR_MW):
-    """Estimate LBMP price reduction for active hours using quadratic fit."""
+    """Estimate LBMP price reduction for active hours using quadratic fit.
+
+    Uses RT LBMP if available, falls back to DA.
+    """
     if lbmp_merged is None or len(lbmp_merged) == 0:
         return None
 
-    valid = lbmp_merged.dropna(subset=["Load", "lbmp"])
-    valid = valid[(valid["lbmp"] > 0) & (valid["lbmp"] < valid["lbmp"].quantile(0.99))]
+    # Use RT prices if available, otherwise DA
+    price_col = "rt_lbmp" if "rt_lbmp" in lbmp_merged.columns else "lbmp"
+    price_label = "RT" if price_col == "rt_lbmp" else "DA"
+
+    valid = lbmp_merged.dropna(subset=["Load", price_col])
+    valid = valid[(valid[price_col] > 0) & (valid[price_col] < valid[price_col].quantile(0.99))]
 
     if len(valid) < 20:
         return None
 
-    coeffs = np.polyfit(valid["Load"].values, valid["lbmp"].values, deg=2)
+    coeffs = np.polyfit(valid["Load"].values, valid[price_col].values, deg=2)
     poly = np.poly1d(coeffs)
 
     # Apply only to active hours
@@ -277,13 +313,27 @@ def estimate_price_impact(lbmp_merged, active_mask, dr_mw=DR_MW):
     active["savings_per_mwh"] = active["price_original"] - active["price_with_dr"]
     active["total_savings"] = active["savings_per_mwh"] * active["Load"]
 
+    # Also compute direct RT savings (actual RT price × DR MW for active hours)
+    # This is the simple "avoided energy cost" without supply curve modeling
+    direct_savings = None
+    if "rt_lbmp" in lbmp_merged.columns:
+        active_rt = lbmp_merged.loc[
+            lbmp_merged.index.isin(active_mask.index[active_mask])
+        ].dropna(subset=["rt_lbmp"])
+        if len(active_rt) > 0:
+            # DR avoids purchasing dr_mw at the RT price
+            direct_savings = (active_rt["rt_lbmp"] * dr_mw).sum() / 1e6
+
+    peak_mask = (valid.index.hour.isin(range(14, 19))) & (valid.index.dayofweek < 5)
+
     return {
-        "avg_lbmp": valid["lbmp"].mean(),
-        "avg_peak_lbmp": valid.loc[
-            (valid.index.hour.isin(range(14, 19))) & (valid.index.dayofweek < 5), "lbmp"
-        ].mean(),
+        "price_source": price_label,
+        "avg_lbmp": valid[price_col].mean(),
+        "avg_peak_lbmp": valid.loc[peak_mask, price_col].mean() if peak_mask.any() else 0,
+        "max_lbmp": lbmp_merged[price_col].max() if price_col in lbmp_merged.columns else 0,
         "avg_savings_per_mwh": active["savings_per_mwh"].mean(),
         "total_consumer_savings_m": active["total_savings"].sum() / 1e6,
+        "direct_avoided_cost_m": direct_savings,
         "active_hours": len(active),
         "poly": poly,
     }
@@ -326,9 +376,16 @@ def print_scenario_results(name, description, dr_df, merged_hourly, price_info=N
         print(f"  (Rate of generators actually displaced by DR)")
 
     if price_info:
-        print(f"\n  Electricity price impact:")
+        src = price_info.get("price_source", "DA")
+        print(f"\n  Electricity price impact ({src} LBMP):")
+        print(f"    Avg {src} LBMP:                 ${price_info['avg_lbmp']:.2f} / MWh")
+        print(f"    Peak {src} LBMP (wkday 2-6pm):  ${price_info['avg_peak_lbmp']:.2f} / MWh")
+        print(f"    Max {src} LBMP:                  ${price_info['max_lbmp']:,.2f} / MWh")
         print(f"    Avg price reduction:         ${price_info['avg_savings_per_mwh']:.2f} / MWh")
         print(f"    Consumer savings (est.):     ${price_info['total_consumer_savings_m']:.1f} million")
+        if price_info.get("direct_avoided_cost_m") is not None:
+            print(f"    Direct avoided RT cost:      ${price_info['direct_avoided_cost_m']:.1f} million")
+            print(f"    (= {DR_MW} MW × RT price for each active hour)")
 
     print()
     return {
@@ -341,4 +398,5 @@ def print_scenario_results(name, description, dr_df, merged_hourly, price_info=N
         "ef_change_pct": (new_ef / orig_ef - 1) * 100,
         "avg_marginal_ef": dr_df["marginal_ef"].mean() if len(dr_df) > 0 else 0,
         "price_savings_m": price_info["total_consumer_savings_m"] if price_info else None,
+        "rt_avoided_m": price_info.get("direct_avoided_cost_m") if price_info else None,
     }

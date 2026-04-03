@@ -225,20 +225,21 @@ def main():
         scenario_details[name] = {"dr_df": dr_df, "summary": summary}
 
     # Comparison table
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 105)
     print("SCENARIO COMPARISON SUMMARY")
-    print("=" * 90)
+    print("=" * 105)
     print(f"\n  {'Scenario':<20} {'Hours':>7} {'CO2 Disp':>12} {'% Total':>8} "
-          f"{'EF Chg':>8} {'Marg EF':>10} {'Price $M':>9}")
-    print(f"  {'─'*20} {'─'*7} {'─'*12} {'─'*8} {'─'*8} {'─'*10} {'─'*9}")
+          f"{'EF Chg':>8} {'Marg EF':>10} {'Price $M':>9} {'RT Avoid':>9}")
+    print(f"  {'─'*20} {'─'*7} {'─'*12} {'─'*8} {'─'*8} {'─'*10} {'─'*9} {'─'*9}")
 
     for r in all_results:
         price_str = f"${r['price_savings_m']:.0f}M" if r["price_savings_m"] else "n/a"
+        rt_str = f"${r['rt_avoided_m']:.0f}M" if r.get("rt_avoided_m") else "n/a"
         print(f"  {r['name']:<20} {r['active_hours']:>7,} "
               f"{r['displaced_co2']:>12,.0f} {r['pct_of_total']:>7.1f}% "
               f"{r['ef_change_pct']:>+7.2f}% "
               f"{r['avg_marginal_ef']:>9.4f} "
-              f"{price_str:>9}")
+              f"{price_str:>9} {rt_str:>9}")
 
     # Save CSV
     results_df = pd.DataFrame(all_results)
