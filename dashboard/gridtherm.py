@@ -99,6 +99,118 @@ current_utilization = round(utilization_pct + (dr_steam_demand_mlbhr / total_cap
 
 buildings_json = json.dumps(buildings)
 
+# ── Plant data ─────────────────────────────────────────────────────────────
+# Station locations (well-known ConEd steam plant addresses)
+PLANT_LOCATIONS = {
+    "East River": {"lat": 40.7355, "lon": -73.9737, "address": "500 East 14th St"},
+    "59th Street": {"lat": 40.7603, "lon": -73.9596, "address": "226 East 60th St"},
+    "74th Street": {"lat": 40.7671, "lon": -73.9536, "address": "501 East 74th St"},
+    "60th Street": {"lat": 40.7717, "lon": -73.9847, "address": "200 West 60th St"},
+}
+
+# Import plants.py data
+import sys
+sys.path.insert(0, os.path.join(ROOT, "steam_supply"))
+from plants import LARGE_BOILERS, PACKAGE_BOILERS, STATION_SENDOUT, SUMMER_HOURS, WINTER_HOURS
+
+# Aggregate capacity by station
+station_capacity = {}
+for u in LARGE_BOILERS + PACKAGE_BOILERS:
+    st = u["station"]
+    station_capacity[st] = station_capacity.get(st, 0) + u["steam_rating_mlbhr"]
+
+# Aggregate sendout by station
+station_sendout = {}
+for s in STATION_SENDOUT:
+    st = s["station"]
+    if st not in station_sendout:
+        station_sendout[st] = {"summer": 0, "winter": 0, "annual": 0}
+    station_sendout[st]["summer"] += s["summer_sendout_mlb"]
+    station_sendout[st]["winter"] += s["winter_sendout_mlb"]
+    station_sendout[st]["annual"] += s["annual_sendout_mlb"]
+
+# Determine cogen stations and their energy split
+# East River 10/20: GE 7FA.04 CTs, ~38% electric efficiency
+# BNYCP: Third-party cogen, similar profile
+# All others: boiler-only (100% steam)
+COGEN_STATIONS = {"East River"}
+
+# East River electric output: from CAMPD, ER 10/20 annual elec efficiency ~38%
+COGEN_ELECTRIC_EFF = {
+    "East River": 0.38,
+}
+# Steam recovery efficiency (fraction of input energy delivered as steam)
+# ER 10/20: ~45% to steam, ~38% electric, ~17% losses
+COGEN_STEAM_EFF = {
+    "East River": 0.45,
+}
+
+# Electric capacity (MW) — from ConEd PSC filings and EPA CAMPD
+# East River: 2x GE 7FA.04 combustion turbines
+ELECTRIC_CAPACITY_MW = {
+    "East River": 340,  # 2x ~170 MW
+}
+
+plants_data = []
+for station_name, loc in PLANT_LOCATIONS.items():
+    cap = station_capacity.get(station_name, 0)
+    send = station_sendout.get(station_name, {"summer": 0, "winter": 0, "annual": 0})
+    if cap == 0 and send["annual"] == 0:
+        continue  # skip retired
+
+    summer_avg = send["summer"] / SUMMER_HOURS if SUMMER_HOURS > 0 else 0
+    winter_avg = send["winter"] / WINTER_HOURS if WINTER_HOURS > 0 else 0
+    annual_hours = SUMMER_HOURS + WINTER_HOURS
+    annual_avg = send["annual"] / annual_hours if annual_hours > 0 else 0
+
+    summer_load_factor = round(summer_avg / cap * 100, 1) if cap > 0 else 0
+    winter_load_factor = round(winter_avg / cap * 100, 1) if cap > 0 else 0
+    annual_load_factor = round(annual_avg / cap * 100, 1) if cap > 0 else 0
+
+    is_cogen = station_name in COGEN_STATIONS
+    if is_cogen:
+        elec_pct = round(COGEN_ELECTRIC_EFF[station_name] * 100, 0)
+        steam_pct = round(COGEN_STEAM_EFF[station_name] * 100, 0)
+        losses_pct = round(100 - elec_pct - steam_pct, 0)
+    else:
+        elec_pct = 0
+        # Boiler efficiency: enthalpy / heat rate
+        # Avg boiler heat rate ~1500 BTU/lb, enthalpy ~1195 BTU/lb → ~80% eff
+        steam_pct = 80
+        losses_pct = 20
+
+    elec_mw = ELECTRIC_CAPACITY_MW.get(station_name, 0)
+
+    plants_data.append({
+        "name": station_name,
+        "lat": loc["lat"],
+        "lon": loc["lon"],
+        "address": loc["address"],
+        "capacity_mlbhr": cap,
+        "is_cogen": is_cogen,
+        "summer_sendout_mlb": send["summer"],
+        "winter_sendout_mlb": send["winter"],
+        "annual_sendout_mlb": send["annual"],
+        "summer_avg_mlbhr": round(summer_avg, 0),
+        "winter_avg_mlbhr": round(winter_avg, 0),
+        "summer_load_factor": summer_load_factor,
+        "winter_load_factor": winter_load_factor,
+        "annual_load_factor": annual_load_factor,
+        "elec_pct": elec_pct,
+        "steam_pct": steam_pct,
+        "losses_pct": losses_pct,
+        "elec_capacity_mw": elec_mw,
+        "share_of_annual": round(send["annual"] / steam["annual_sendout_mlb"] * 100, 1),
+    })
+
+plants_data.sort(key=lambda p: p["annual_sendout_mlb"], reverse=True)
+plants_json = json.dumps(plants_data)
+
+total_system_capacity = sum(p["capacity_mlbhr"] for p in plants_data)
+total_cogen_capacity = sum(p["capacity_mlbhr"] for p in plants_data if p["is_cogen"])
+total_elec_mw = sum(p["elec_capacity_mw"] for p in plants_data)
+num_plants = len(plants_data)
+
 # ── Efficiency metrics ──────────────────────────────────────────────────────
 # Load emission factors
 with open(os.path.join(ROOT, "steam_supply", "output", "emission_factors_2025.json")) as f:
@@ -200,17 +312,12 @@ html = f"""<!DOCTYPE html>
   }}
 
   /* ── Main layout ── */
-  .main {{
-    display: grid;
-    grid-template-columns: 1fr 420px;
-    height: calc(100vh - 56px);
-  }}
 
   /* ── Map panel ── */
   .map-panel {{
     position: relative;
   }}
-  #map {{ height: 100%; width: 100%; }}
+  #map, #supply-map {{ height: 100%; width: 100%; }}
   .map-overlay {{
     position: absolute;
     top: 16px;
@@ -490,6 +597,153 @@ html = f"""<!DOCTYPE html>
   }}
   .leaflet-popup-content b {{ color: var(--accent); }}
   .popup-status {{ font-weight: 600; text-transform: uppercase; font-size: 10px; }}
+
+  /* ── Tabs ── */
+  .tab-bar {{
+    display: flex;
+    gap: 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    flex-shrink: 0;
+  }}
+  .tab-btn {{
+    padding: 10px 20px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+  }}
+  .tab-btn:hover {{ color: var(--text); }}
+  .tab-btn.active {{
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }}
+  .tab-content {{ display: none; }}
+  .tab-content.active {{ display: grid; }}
+
+  /* ── Supply tab layout ── */
+  .supply-tab {{
+    grid-template-columns: 1fr 420px;
+    height: calc(100vh - 56px - 42px);
+  }}
+
+  /* ── Plant roster ── */
+  .plant-row {{
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+  }}
+  .plant-row:hover {{ background: var(--panel-alt); }}
+  .plant-row-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }}
+  .plant-name {{
+    font-size: 13px;
+    font-weight: 600;
+  }}
+  .plant-type-badge {{
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 7px;
+    border-radius: 8px;
+  }}
+  .badge-cogen {{
+    background: rgba(2,119,189,0.1);
+    color: var(--accent);
+  }}
+  .badge-boiler {{
+    background: rgba(230,81,0,0.1);
+    color: var(--amber);
+  }}
+  .plant-addr {{
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }}
+  .plant-stats {{
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+  }}
+  .plant-stat-item {{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }}
+  .plant-stat-label {{
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+  }}
+  .plant-stat-value {{
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }}
+
+  /* Load factor mini bar */
+  .load-bar {{
+    width: 80px;
+    height: 6px;
+    background: var(--panel-alt);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 3px;
+  }}
+  .load-bar-fill {{
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+  }}
+
+  /* Energy split bar */
+  .energy-split-bar {{
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+  }}
+  .energy-split-bar .seg-elec {{ background: var(--accent); }}
+  .energy-split-bar .seg-steam {{ background: var(--cyan); }}
+  .energy-split-bar .seg-losses {{ background: var(--border); }}
+  .energy-split-legend {{
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }}
+  .energy-split-legend span {{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }}
+  .energy-split-legend .swatch {{
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }}
+
+  /* DR tab layout override */
+  .dr-tab {{
+    grid-template-columns: 1fr 420px;
+    height: calc(100vh - 56px - 42px);
+  }}
 </style>
 </head>
 <body>
@@ -513,9 +767,14 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Main -->
-<div class="main">
-  <!-- Map -->
+<!-- Tabs -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('dr')">Demand Response</button>
+  <button class="tab-btn" onclick="switchTab('supply')">Steam Supply</button>
+</div>
+
+<!-- DR Tab -->
+<div class="tab-content dr-tab active" id="tab-dr">
   <div class="map-panel">
     <div id="map"></div>
     <div class="map-overlay">
@@ -609,21 +868,99 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Supply Tab -->
+<div class="tab-content supply-tab" id="tab-supply">
+  <div class="map-panel">
+    <div id="supply-map"></div>
+    <div class="map-overlay">
+      <h3>Steam Plants</h3>
+      <div class="map-legend">
+        <div class="item"><div class="dot" style="background:var(--accent)"></div>Cogeneration</div>
+        <div class="item"><div class="dot" style="background:var(--amber)"></div>Boiler-only</div>
+      </div>
+    </div>
+  </div>
+  <div class="right-panel">
+    <div class="metrics-strip">
+      <div class="metric-card">
+        <div class="label">Plants</div>
+        <div class="value">{num_plants}</div>
+        <div class="unit">stations</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Steam Capacity</div>
+        <div class="value">{total_system_capacity // 1000}k<span class="unit"> Mlb/hr</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Electric Capacity</div>
+        <div class="value">{total_elec_mw}<span class="unit"> MW</span></div>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h3>System Load Factor (Summer)</h3>
+      <div class="util-bar-container">
+        <div class="util-bar-header">
+          <span>Avg utilization</span>
+          <span style="color:var(--accent)">{utilization_pct}%</span>
+        </div>
+        <div class="util-bar">
+          <div class="segment base" style="width:{utilization_pct}%; background:var(--accent); opacity:0.7"></div>
+        </div>
+        <div class="util-labels">
+          <span>0 Mlb/hr</span>
+          <span>{int(steam["summer_avg_rate_mlbhr"]):,} avg sendout</span>
+          <span>{total_capacity:,} Mlb/hr rated</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="roster-header">
+      <h3>Plant Details</h3>
+    </div>
+    <div class="roster" id="plant-roster"></div>
+  </div>
+</div>
+
 <script>
 const buildings = {buildings_json};
+const plants = {plants_json};
 
-// ── Map ────────────────────────────────────────────────────────────────────
-const map = L.map('map', {{
+// ── Tab switching ─────────────────────────────────────────────────────────
+let supplyMapInit = false;
+function switchTab(tab) {{
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+
+  if (tab === 'dr') {{
+    setTimeout(() => drMap.invalidateSize(), 50);
+  }}
+  if (tab === 'supply') {{
+    if (!supplyMapInit) {{
+      setTimeout(() => {{
+        initSupplyMap();
+        supplyMapInit = true;
+      }}, 50);
+    }} else {{
+      setTimeout(() => supplyMap.invalidateSize(), 50);
+    }}
+  }}
+}}
+
+// ── DR Map ────────────────────────────────────────────────────────────────
+const drMap = L.map('map', {{
   zoomControl: false,
   attributionControl: false,
 }}).setView([40.765, -73.975], 13);
 
-L.control.zoom({{ position: 'bottomright' }}).addTo(map);
+L.control.zoom({{ position: 'bottomright' }}).addTo(drMap);
 
 L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
   maxZoom: 19,
   subdomains: 'abcd',
-}}).addTo(map);
+}}).addTo(drMap);
 
 const statusColors = {{
   responding: '#2e7d32',
@@ -640,7 +977,7 @@ buildings.forEach((b, i) => {{
     fillColor: statusColors[b.status],
     fillOpacity: 0.55,
     weight: 1.5,
-  }}).addTo(map);
+  }}).addTo(drMap);
 
   const statusClass = b.status === 'responding' ? 'color:#2e7d32' :
                       b.status === 'ready' ? 'color:#0277bd' : 'color:#c62828';
@@ -686,11 +1023,135 @@ function filterRoster(status) {{
 
 function focusBuilding(index) {{
   const b = buildings[index];
-  map.flyTo([b.lat, b.lon], 16, {{ duration: 0.6 }});
+  drMap.flyTo([b.lat, b.lon], 16, {{ duration: 0.6 }});
   markers[index].openPopup();
 }}
 
 renderRoster('all');
+
+// ── Supply Map ────────────────────────────────────────────────────────────
+let supplyMap;
+const plantMarkers = [];
+
+function initSupplyMap() {{
+  supplyMap = L.map('supply-map', {{
+    zoomControl: false,
+    attributionControl: false,
+  }}).setView([40.745, -73.965], 12);
+
+  L.control.zoom({{ position: 'bottomright' }}).addTo(supplyMap);
+
+  L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+    maxZoom: 19,
+    subdomains: 'abcd',
+  }}).addTo(supplyMap);
+
+  plants.forEach((p, i) => {{
+    const color = p.is_cogen ? '#0277bd' : '#e65100';
+    const radius = Math.max(8, Math.min(20, Math.sqrt(p.capacity_mlbhr / 50)));
+    const marker = L.circleMarker([p.lat, p.lon], {{
+      radius: radius,
+      color: color,
+      fillColor: color,
+      fillOpacity: 0.5,
+      weight: 2,
+    }}).addTo(supplyMap);
+
+    const typeName = p.is_cogen ? 'Cogeneration' : 'Boiler-only';
+    const splitHtml = p.is_cogen
+      ? `Elec: <b>${{p.elec_pct}}%</b> &middot; Steam: <b>${{p.steam_pct}}%</b> &middot; Losses: ${{p.losses_pct}}%`
+      : `Steam: <b>${{p.steam_pct}}%</b> &middot; Losses: ${{p.losses_pct}}%`;
+
+    const elecHtml = p.elec_capacity_mw > 0
+      ? `Electric: <b>${{p.elec_capacity_mw}} MW</b><br>`
+      : '';
+
+    marker.bindPopup(`
+      <div>
+        <b>${{p.name}}</b><br>
+        <span style="color:#6b7a8d">${{typeName}} &middot; ${{p.address}}</span><br><br>
+        Steam: <b>${{p.capacity_mlbhr.toLocaleString()}} Mlb/hr</b><br>
+        ${{elecHtml}}
+        Summer load factor: <b>${{p.summer_load_factor}}%</b><br>
+        System share: <b>${{p.share_of_annual}}%</b> of annual sendout<br><br>
+        <span style="font-size:10px;color:#6b7a8d">ENERGY SPLIT: ${{splitHtml}}</span>
+      </div>
+    `);
+
+    plantMarkers.push(marker);
+  }});
+
+  renderPlantRoster();
+}}
+
+function renderPlantRoster() {{
+  const roster = document.getElementById('plant-roster');
+  roster.innerHTML = plants.map((p, i) => {{
+    const lf = p.summer_load_factor;
+    const lfColor = lf > 50 ? '#2e7d32' : lf > 20 ? '#e65100' : '#c62828';
+    const typeBadge = p.is_cogen
+      ? '<span class="plant-type-badge badge-cogen">Cogen</span>'
+      : '<span class="plant-type-badge badge-boiler">Boiler</span>';
+
+    const energySplit = p.is_cogen
+      ? `<div class="energy-split-bar">
+           <div class="seg-elec" style="width:${{p.elec_pct}}%"></div>
+           <div class="seg-steam" style="width:${{p.steam_pct}}%"></div>
+           <div class="seg-losses" style="width:${{p.losses_pct}}%"></div>
+         </div>
+         <div class="energy-split-legend">
+           <span><div class="swatch" style="background:var(--accent)"></div>Elec ${{p.elec_pct}}%</span>
+           <span><div class="swatch" style="background:var(--cyan)"></div>Steam ${{p.steam_pct}}%</span>
+           <span><div class="swatch" style="background:var(--border)"></div>Losses ${{p.losses_pct}}%</span>
+         </div>`
+      : `<div class="energy-split-bar">
+           <div class="seg-steam" style="width:${{p.steam_pct}}%"></div>
+           <div class="seg-losses" style="width:${{p.losses_pct}}%"></div>
+         </div>
+         <div class="energy-split-legend">
+           <span><div class="swatch" style="background:var(--cyan)"></div>Steam ${{p.steam_pct}}%</span>
+           <span><div class="swatch" style="background:var(--border)"></div>Losses ${{p.losses_pct}}%</span>
+         </div>`;
+
+    return `
+      <div class="plant-row" onclick="focusPlant(${{i}})">
+        <div class="plant-row-header">
+          <span class="plant-name">${{p.name}}</span>
+          ${{typeBadge}}
+        </div>
+        <div class="plant-addr">${{p.address}} &middot; ${{p.share_of_annual}}% of system sendout</div>
+        <div class="plant-stats">
+          <div class="plant-stat-item">
+            <span class="plant-stat-label">Steam Capacity</span>
+            <span class="plant-stat-value">${{p.capacity_mlbhr.toLocaleString()}} <span style="font-weight:400;font-size:10px;color:var(--text-dim)">Mlb/hr</span></span>
+          </div>
+          ${{p.elec_capacity_mw > 0 ? `
+          <div class="plant-stat-item">
+            <span class="plant-stat-label">Electric</span>
+            <span class="plant-stat-value">${{p.elec_capacity_mw}} <span style="font-weight:400;font-size:10px;color:var(--text-dim)">MW</span></span>
+          </div>` : ''}}
+          <div class="plant-stat-item">
+            <span class="plant-stat-label">Summer Load</span>
+            <span class="plant-stat-value" style="color:${{lfColor}}">${{lf}}%</span>
+            <div class="load-bar"><div class="load-bar-fill" style="width:${{Math.min(lf, 100)}}%;background:${{lfColor}}"></div></div>
+          </div>
+          <div class="plant-stat-item">
+            <span class="plant-stat-label">Winter Load</span>
+            <span class="plant-stat-value">${{p.winter_load_factor}}%</span>
+            <div class="load-bar"><div class="load-bar-fill" style="width:${{Math.min(p.winter_load_factor, 100)}}%;background:var(--accent)"></div></div>
+          </div>
+        </div>
+        ${{energySplit}}
+      </div>
+    `;
+  }}).join('');
+}}
+
+function focusPlant(index) {{
+  const p = plants[index];
+  supplyMap.flyTo([p.lat, p.lon], 15, {{ duration: 0.6 }});
+  plantMarkers[index].openPopup();
+}}
 </script>
 </body>
 </html>
