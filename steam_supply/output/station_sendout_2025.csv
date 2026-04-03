@@ -1,0 +1,13 @@
+station_group,station,summer_sendout_mlb,winter_sendout_mlb,annual_sendout_mlb,summer_heat_rate_btu_lb,winter_heat_rate_btu_lb,annual_heat_rate_btu_lb,notes
+East River 60 Extraction Station,East River,0,968114,968114,0,1185,1185,Winter-only operation. Extraction steam turbine.
+East River 10 and 20,East River,4485774,4753649,9239423,4,31,20,Primary cogen. 4 btu/lb summer = steam is nearly free byproduct of electric generation.
+East River Boiler 70 (Steam Only),East River,0,394022,394022,0,1640,1640,Winter-only steam boiler mode. Electric-only in summer.
+East River Boiler 60 (Steam Only),East River,0,0,0,0,0,0,Zero sendout all year. May be offline/reserve.
+East River South Steam Package,East River,170685,643517,814202,1523,1452,1463,5 package boilers at 130 Mlb/hr each.
+59th Street Annex,59th Street,155684,1514005,1669689,1555,1514,1518,2 HP annex boilers at 500 Mlb/hr each. 73% summer FOR.
+59th Street Package,59th Street,86384,265737,352121,1363,1447,1426,3 package boilers.
+Ravenswood Steam,Ravenswood,0,0,0,0,0,0,"Retired. Zero sendout, zero rating."
+74th Street High Pressure,74th Street,340819,2726992,3067811,1551,1512,1516,3 HP boilers at 433 Mlb/hr each. Very reliable (0.1% FOR).
+74th Street Package,74th Street,126068,504195,630263,1810,1658,1654,6 package boilers.
+60th Street Package,60th Street,195086,612977,808063,1392,1425,1417,"6 package boilers, natural gas or distillate oil."
+BNYCP,Brooklyn Navy Yard,1407801,2554012,3961813,0,0,0,"Third-party cogen (Axium Infrastructure). Heat rate 0 = ConEd purchases steam, doesn't burn fuel."

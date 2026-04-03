@@ -1,0 +1,15 @@
+unit,station,type,steam_rating_mlbhr,summer_for_pct,winter_for_pct,annual_for_pct,notes
+East River 1/10,East River,cogen_ct_hrsg,1600,1.9,0.6,1.3,GE 7FA.04 combustion turbine + HRSG with duct burners
+East River 2/20,East River,cogen_ct_hrsg,1600,1.9,0.6,1.3,GE 7FA.04 combustion turbine + HRSG with duct burners
+East River 6/60,East River,boiler_steam_only,830,1.9,0.6,1.3,"Natural circulation boiler, extraction mode cogen capable. Zero summer sendout in 2025."
+East River 7/70,East River,boiler_steam_only,1200,1.9,0.6,1.3,"Runs electric-only in summer, steam-only boiler in winter. Converted to steam sendout 1995."
+59th Street Annex Boiler A,59th Street,boiler_hp,500,73.4,16.6,34.7,"High forced outage rate, especially in summer."
+59th Street Annex Boiler B,59th Street,boiler_hp,500,73.4,16.6,34.7,"High forced outage rate, especially in summer."
+74th Street HP Boiler 1,74th Street,boiler_hp,433,0.0,0.1,0.1,Very reliable. Three HP boilers at 433 Mlb/hr each.
+74th Street HP Boiler 2,74th Street,boiler_hp,433,0.0,0.1,0.1,Very reliable.
+74th Street HP Boiler 3,74th Street,boiler_hp,433,0.0,0.1,0.1,Very reliable.
+East River South Package,East River,package_boiler,650,2.8,0.0,0.7,"5 package boilers, 130 Mlb/hr each."
+Ravenswood Steam,Ravenswood,package_boiler,0,0.0,0.0,0.0,Rated at 0. Effectively retired — zero sendout all year.
+59th Street Package,59th Street,package_boiler,381,0.0,0.0,0.0,3 package boilers.
+60th Street Package,60th Street,package_boiler,726,0.0,1.1,0.9,"6 package boilers, burn natural gas or distillate oil."
+74th Street Package,74th Street,package_boiler,708,4.0,0.3,1.1,6 package boilers.

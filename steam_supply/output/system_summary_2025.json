@@ -1,0 +1,14 @@
+{
+  "total_rated_capacity_mlbhr": 9994,
+  "summer_sendout_mlb": 6968301,
+  "winter_sendout_mlb": 14937220,
+  "annual_sendout_mlb": 21905521,
+  "summer_avg_rate_mlbhr": 1578.0,
+  "winter_avg_rate_mlbhr": 3439.0,
+  "summer_spare_capacity_mlbhr": 8416.0,
+  "winter_spare_capacity_mlbhr": 6555.0,
+  "summer_utilization_pct": 15.8,
+  "winter_utilization_pct": 34.4,
+  "cogen_pct_annual": 60.3,
+  "cogen_pct_summer": 84.6
+}

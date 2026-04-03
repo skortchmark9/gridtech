@@ -1,0 +1,90 @@
+{
+  "boiler_emission_factors": {
+    "East River (boilers 60/70)": {
+      "annual_co2_lbs_per_mlb": 171.35418902596595,
+      "summer_co2_lbs_per_mlb": 167.07179814204466,
+      "winter_co2_lbs_per_mlb": 175.9631361713201
+    },
+    "59th Street": {
+      "annual_co2_lbs_per_mlb": 172.1809356716418,
+      "summer_co2_lbs_per_mlb": 169.83396358267362,
+      "winter_co2_lbs_per_mlb": 172.52590325985787
+    },
+    "74th Street": {
+      "annual_co2_lbs_per_mlb": 146.5039894682803,
+      "summer_co2_lbs_per_mlb": 146.72930131758116,
+      "winter_co2_lbs_per_mlb": 146.47530170056066
+    }
+  },
+  "cogen_emission_factors": {
+    "East River 10/20": {
+      "electric_co2_lbs_per_mwh": 1271.7665595683902,
+      "steam_co2_lbs_per_mlb": {
+        "energy": 179.71032060032908,
+        "avoided_burden": 175.50000000000003,
+        "marginal": 0
+      }
+    },
+    "Brooklyn Navy Yard": {
+      "electric_co2_lbs_per_mwh": 1368.6854559700896,
+      "steam_co2_lbs_per_mlb": {
+        "energy": 259.47752257389135,
+        "avoided_burden": 175.5,
+        "marginal": 0
+      }
+    }
+  },
+  "venting": {
+    "East River 10/20": {
+      "summer": {
+        "excess_mlb": 1001981.3262399994,
+        "excess_pct": 18.25849125322646,
+        "excess_avg_rate_mlbhr": 226.89794525362305
+      },
+      "winter": {
+        "excess_mlb": 1320477.93712,
+        "excess_pct": 21.739386594809858,
+        "excess_avg_rate_mlbhr": 303.9774256721915
+      },
+      "annual": {
+        "excess_mlb": 2322459.263360003,
+        "excess_pct": 20.087207346159847,
+        "excess_avg_rate_mlbhr": 265.1209204748862
+      }
+    },
+    "Brooklyn Navy Yard": {
+      "summer": {
+        "excess_mlb": 3394865.992287999,
+        "excess_pct": 70.68709943328132,
+        "excess_avg_rate_mlbhr": 768.7649439057968
+      },
+      "winter": {
+        "excess_mlb": 2208017.9282687996,
+        "excess_pct": 46.367157735850434,
+        "excess_avg_rate_mlbhr": 508.2914199513811
+      },
+      "annual": {
+        "excess_mlb": 5602883.920556802,
+        "excess_pct": 58.57879206308018,
+        "excess_avg_rate_mlbhr": 639.5986210681281
+      }
+    }
+  },
+  "system_blended": {
+    "energy": {
+      "annual": 184.14680884235804,
+      "summer": 188.94299786476432,
+      "winter": 179.73187687599312
+    },
+    "avoided_burden": {
+      "annual": 170.01363347097686,
+      "summer": 171.13238191859725,
+      "winter": 169.2893352201787
+    },
+    "marginal": {
+      "annual": 81.89842344697128,
+      "summer": 71.0323990290038,
+      "winter": 88.93328682113182
+    }
+  }
+}
